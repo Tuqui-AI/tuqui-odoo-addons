@@ -481,7 +481,7 @@ describe("the drop by name, on the screen as it is now", () => {
 
     test("the parts of one widget are one: it marks the biggest, the search input", async () => {
         await mountPartner();
-        const box = place(`<div class="o_searchview"><button type="button" aria-label="Buscar…"><i class="oi oi-search"></i></button>
+        const box = place(`<div class="o_searchview"><button type="button" aria-label="Buscar…"><i class="oi" data-icon="search"></i></button>
             <div class="o_searchview_input_container"><input type="text" placeholder="Buscar…" style="width: 300px"/></div></div>`);
         const { found } = findByName("Buscar…");
         expect(found.length).toBe(1);
