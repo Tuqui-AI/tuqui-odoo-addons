@@ -168,6 +168,7 @@ export class TuquiPanel extends Component {
         });
         this.tuquiAssistant = useService("tuquiAssistant");
         this.notification = useService("notification");
+        this.action = useService("action");
         this.state = useState(this.tuquiAssistant.state); // { panelOpen, context }
         this.ui = useState({
             // Resolved from the companion (oauth client): whether connected, the
@@ -192,6 +193,10 @@ export class TuquiPanel extends Component {
             // suggest when it does not. Only read once the frame is stuck.
             originAuthorized: true,
             mainOrigin: null,
+            // Tuqui said it no longer holds this connection. Asked only once the
+            // frame is stuck, and checked before any other reason.
+            connectionLost: false,
+            canReconnect: false,
             // Last SPA path (e.g. /w/:slug/chat/:id), persisted in localStorage so
             // the conversation resumes on page reload or panel reopen. Updated when
             // the SPA posts "location"; used in embedUrl to load the right
@@ -265,6 +270,7 @@ export class TuquiPanel extends Component {
                     this.ui.embedReady = false;
                     this.ui.embedBlocked = false;
                     this.ui.embedFailed = false;
+                    this.ui.connectionLost = false;
                     this._armEmbedWatchdog();
                     this._authPosted = false;
                     this._menuHintDone = false;
@@ -579,8 +585,22 @@ export class TuquiPanel extends Component {
                 this.ui.embedBlocked = true;
                 // A late "ready" may come after the pre-minted nonce's TTL: mint then.
                 this._ssoAuthPromise = null;
+                void this._checkConnection();
             }
         }, EMBED_HANDSHAKE_TIMEOUT_MS);
+    }
+
+    async _checkConnection() {
+        const { lost, can_reconnect } = await this.tuquiAssistant.checkConnection();
+        // A "ready" may have landed while Tuqui was answering.
+        if (this.ui.embedBlocked) {
+            this.ui.connectionLost = Boolean(lost);
+            this.ui.canReconnect = Boolean(can_reconnect);
+        }
+    }
+
+    openTuquiSettings() {
+        this.action.doAction("base_setup.action_general_configuration");
     }
 
     _clearEmbedWatchdog() {
@@ -949,12 +969,14 @@ export class TuquiPanel extends Component {
                     this.ui.embedFailed = true;
                     this.ui.embedBlocked = true;
                     this._ssoAuthPromise = null;
+                    void this._checkConnection();
                 }
                 break;
             case "ready":
                 this.ui.embedReady = true;
                 this.ui.embedBlocked = false;
                 this.ui.embedFailed = false;
+                this.ui.connectionLost = false;
                 this._clearEmbedWatchdog();
                 this._postAuth(); // SSO: send nonce + client_id to iframe (before context)
                 this._postContext();

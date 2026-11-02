@@ -7,10 +7,14 @@ Mirrors ``tuqui/tests/test_activation.py``. All data is built with ``.create()``
 import hashlib
 import hmac
 import json
+from unittest.mock import MagicMock, patch
 
+import requests
 from odoo import fields
 from odoo.exceptions import UserError
-from odoo.tests import HttpCase, TransactionCase, tagged
+from odoo.tests import HttpCase, TransactionCase, new_test_user, tagged
+
+_REQUESTS_GET = "odoo.addons.tuqui_assistant.models.tuqui_assistant_sso_nonce.requests.get"
 
 
 @tagged("post_install", "-at_install", "tuqui_assistant")
@@ -63,6 +67,46 @@ class TestTuquiAssistantSsoNonceModel(TransactionCase):
         self.oauth_client.write({"state": "disconnected"})
         boot = self.Nonce.embed_bootstrap()
         self.assertFalse(boot["connected"], "disconnected companion → not connected")
+
+    # ---- check_connection ----
+
+    def _check_with(self, **response):
+        fake = MagicMock(status_code=response.get("status", 200))
+        fake.json.return_value = response.get("json", {})
+        with patch(_REQUESTS_GET, return_value=fake) as mocked:
+            return self.Nonce.check_connection(), mocked
+
+    def test_check_connection_lost_when_tuqui_says_no(self):
+        result, mocked = self._check_with(json={"chat_enabled": False})
+        self.assertEqual(result, {"lost": True, "can_reconnect": True})
+        self.assertEqual(mocked.call_args.kwargs["params"], {"client_id": self.oauth_client.client_id})
+
+    def test_check_connection_kept_when_tuqui_says_yes(self):
+        result, _mocked = self._check_with(json={"chat_enabled": True})
+        self.assertEqual(result, {"lost": False, "can_reconnect": False})
+
+    def test_check_connection_unknown_is_not_lost(self):
+        # An edge or proxy answering 401 must never read as a lost connection.
+        result, _mocked = self._check_with(status=401, json={"chat_enabled": False})
+        self.assertFalse(result["lost"])
+        with patch(_REQUESTS_GET, side_effect=requests.Timeout("slow")):
+            self.assertFalse(self.Nonce.check_connection()["lost"])
+        self.assertEqual(self.oauth_client.state, "active", "never disconnects on its own")
+
+    def test_check_connection_skips_test_databases(self):
+        # Tuqui answers for the workspace's own Odoo: a copy's client_id would read as lost.
+        self.oauth_client.write({"state": "test"})
+        with patch(_REQUESTS_GET) as mocked:
+            self.assertFalse(self.Nonce.check_connection()["lost"])
+        mocked.assert_not_called()
+
+    def test_check_connection_user_cannot_reconnect(self):
+        user = new_test_user(self.env, login="lost_panel_user", groups="base.group_user")
+        fake = MagicMock(status_code=200)
+        fake.json.return_value = {"chat_enabled": False}
+        with patch(_REQUESTS_GET, return_value=fake):
+            result = self.Nonce.with_user(user).check_connection()
+        self.assertEqual(result, {"lost": True, "can_reconnect": False})
 
     # ---- issue_for_current_user ----
 
