@@ -32,11 +32,11 @@ msgstr ", o pida a un administrador que agregue"
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
 msgid ""
-". The browser may be blocking the panel because that domain is not enabled "
-"yet, or Tuqui took longer than expected."
+". Tuqui may have taken longer than expected, or the browser may be blocking "
+"the panel on that domain."
 msgstr ""
-". Puede ser que el navegador esté bloqueando el panel porque ese dominio "
-"todavía no está habilitado, o que Tuqui haya tardado más de lo esperado."
+". Puede ser que Tuqui haya tardado más de lo esperado, o que el navegador esté "
+"bloqueando el panel en ese dominio."
 
 #. module: tuqui_assistant
 #: model:ir.module.module,summary:base.module_tuqui_assistant
@@ -687,3 +687,30 @@ msgid ""
 msgstr ""
 "id de res.users para el que se emite el token SSO (se toma de env.uid al "
 "emitirlo)."
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Tuqui is no longer connected to this Odoo"
+msgstr "Tuqui ya no está conectado a este Odoo"
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid ""
+"Reconnect it in Settings → Tuqui: disconnect, then activate Tuqui again."
+msgstr ""
+"Vuelva a conectarlo en Ajustes → Tuqui: desconecte y active Tuqui otra vez."
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Open Settings"
+msgstr "Abrir Ajustes"
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Ask an admin to reconnect Tuqui in Settings → Tuqui."
+msgstr ""
+"Pida a un administrador que vuelva a conectar Tuqui en Ajustes → Tuqui."

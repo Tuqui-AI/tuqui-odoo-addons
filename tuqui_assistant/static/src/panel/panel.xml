@@ -80,7 +80,22 @@
                          class="o-tuqui-blocked d-flex flex-column align-items-center justify-content-center text-center p-4">
                         <img class="o-tuqui-logo mb-3" style="width: 48px;"
                              src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
-                        <t t-if="!this.ui.originAuthorized">
+                        <!-- First: when Tuqui no longer holds the connection, no other reason applies. -->
+                        <t t-if="this.ui.connectionLost">
+                            <p class="o-tuqui-msg-title mb-1">Tuqui is no longer connected to this Odoo</p>
+                            <t t-if="this.ui.canReconnect">
+                                <p class="o-tuqui-msg-body mb-3">
+                                    Reconnect it in Settings → Tuqui: disconnect, then activate Tuqui again.
+                                </p>
+                                <button class="btn btn-primary btn-sm o-tuqui-open-settings" t-on-click="this.openTuquiSettings">
+                                    Open Settings
+                                </button>
+                            </t>
+                            <p t-else="" class="o-tuqui-msg-body mb-0">
+                                Ask an admin to reconnect Tuqui in Settings → Tuqui.
+                            </p>
+                        </t>
+                        <t t-elif="!this.ui.originAuthorized">
                             <p class="o-tuqui-msg-title mb-1">This URL is not enabled for Tuqui</p>
                             <p class="o-tuqui-msg-body mb-0">
                                 <t t-if="this.ui.mainOrigin">Open Odoo from <b t-out="this.ui.mainOrigin"/>, or ask an admin to add <b t-out="this.currentOrigin"/> in Settings → Tuqui.</t>
@@ -97,7 +112,7 @@
                         <t t-else="">
                             <p class="o-tuqui-msg-title mb-1">Tuqui did not finish opening</p>
                             <p class="o-tuqui-msg-body mb-2">
-                                You are on <b t-out="this.currentOrigin"/>. The browser may be blocking the panel because that domain is not enabled yet, or Tuqui took longer than expected.
+                                You are on <b t-out="this.currentOrigin"/>. Tuqui may have taken longer than expected, or the browser may be blocking the panel on that domain.
                             </p>
                             <!-- Only a reload retries: the close and systray buttons just minimize, so panelOpen stays true. -->
                             <p class="o-tuqui-msg-body mb-0">
