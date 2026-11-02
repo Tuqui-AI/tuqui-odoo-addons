@@ -1732,6 +1732,15 @@ export const tuquiAssistantService = {
             }
         }
 
+        /** Whether Tuqui still holds this connection. Only once the panel is stuck. */
+        async function checkConnection() {
+            try {
+                return await orm.call("tuqui.assistant.sso.nonce", "check_connection", []);
+            } catch {
+                return { lost: false, can_reconnect: false };
+            }
+        }
+
         /**
          * Contexto a mandarle al SPA (PageContext). Para "record" incluye los
          * valores en memoria (`fields`, escalares por tipo; con cambios sin guardar).
@@ -3147,6 +3156,7 @@ export const tuquiAssistantService = {
             saveRecord,
             getEmbedBootstrap,
             registerTestCopy,
+            checkConnection,
             getSsoAuth,
             getContextPayload,
             noteFocusedField,

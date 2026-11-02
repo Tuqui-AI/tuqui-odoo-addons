@@ -31,8 +31,8 @@ msgstr ""
 #. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
 msgid ""
-". The browser may be blocking the panel because that domain is not enabled "
-"yet, or Tuqui took longer than expected."
+". Tuqui may have taken longer than expected, or the browser may be blocking "
+"the panel on that domain."
 msgstr ""
 
 #. module: tuqui_assistant
@@ -605,4 +605,29 @@ msgstr ""
 msgid ""
 "res.users id the SSO token will be minted for (captured from env.uid at "
 "mint)."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Tuqui is no longer connected to this Odoo"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid ""
+"Reconnect it in Settings → Tuqui: disconnect, then activate Tuqui again."
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Open Settings"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
+msgid "Ask an admin to reconnect Tuqui in Settings → Tuqui."
 msgstr ""

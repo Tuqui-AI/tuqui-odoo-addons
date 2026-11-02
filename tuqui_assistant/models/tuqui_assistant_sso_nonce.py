@@ -1,6 +1,8 @@
+import logging
 import secrets
 import urllib.parse
 
+import requests
 from odoo import _, api, fields, http, models
 from odoo.addons.tuqui.models.tuqui_oauth_client import CONNECTED_STATES
 from odoo.exceptions import UserError
@@ -13,6 +15,11 @@ _NONCE_TTL_SECONDS = 90
 # Housekeeping window for the GC cron — not a security knob (security is
 # single-use + the short TTL above).
 _GC_RETENTION_DAYS = 1
+
+# The person is already looking at a stuck panel: answer soon or not at all.
+_CHECK_CONNECTION_TIMEOUT_SECONDS = 5
+
+_logger = logging.getLogger(__name__)
 
 
 class TuquiAssistantSsoNonce(models.Model):
@@ -122,6 +129,36 @@ class TuquiAssistantSsoNonce(models.Model):
             "origin_authorized": current in hosts,
             "main_origin": base if base in authorized else False,
         }
+
+    @api.model
+    def check_connection(self) -> dict:
+        """Ask Tuqui whether it still holds this connection. Only once the panel is stuck.
+
+        Tuqui can drop a connection without the module hearing about it (a teardown
+        whose revoke never arrived), and the module keeps saying ``active``. Asked
+        only when the frame did not open, never on page load: that keeps a slow or
+        down Tuqui out of every page of the customer's Odoo.
+
+        ``lost`` is True only on an explicit "no" from Tuqui. Any error, timeout or
+        unexpected status means "unknown" and the panel keeps its generic message.
+        Never disconnects on its own: a 401 from an edge or proxy must not cut a
+        working connection. Only for ``active``: Tuqui answers this for the
+        workspace's own Odoo, so a test database's client_id would read as lost.
+        """
+        oauth_client = self.env["tuqui.oauth.client"].sudo()._get_singleton()
+        if not oauth_client or oauth_client.state != "active" or not oauth_client.client_id:
+            return {"lost": False, "can_reconnect": False}
+        try:
+            response = requests.get(
+                f"{oauth_client._get_tuqui_base_url().rstrip('/')}/api/companion/bootstrap",
+                params={"client_id": oauth_client.client_id},
+                timeout=_CHECK_CONNECTION_TIMEOUT_SECONDS,
+            )
+            lost = response.status_code == 200 and response.json().get("chat_enabled") is False
+        except (requests.RequestException, ValueError, AttributeError) as exc:
+            _logger.info("Could not ask Tuqui about this connection: %s", exc)
+            lost = False
+        return {"lost": lost, "can_reconnect": lost and self.env.user.has_group("base.group_system")}
 
     @api.model
     def register_test_copy(self) -> dict:
