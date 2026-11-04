@@ -75,6 +75,8 @@ Host (Odoo) → SPA (iframe):
                    "section": "Trazabilidad", "checked": false } ] } }  // lo que se puede tocar (ver «La gota»)
 { "source": "tuqui-odoo", "type": "switch-company-failed",
   "payload": { "companyId": 2 } }                                   // el host no pudo cambiar de compañía
+{ "source": "tuqui-odoo", "type": "ask",
+  "payload": { "error": { "kind": "user_error", "title": "…", "message": "…" } } } // «Resolver con Tuqui» (ver «Resolver un error»)
 ```
 
 SPA (iframe) → Host (Odoo):
@@ -351,6 +353,57 @@ no puede abrir lo pedido, lo avisa y no mueve la pantalla. Los modos están en
   Como en Odoo, un menú arranca de cero desde su app y un `xmlid` se apila en
   los breadcrumbs.
 - **`new`:** un form vacío con `defaults` como `default_<campo>`.
+
+## Resolver un error (`ask`)
+
+El diálogo de un `UserError` o un `ValidationError` muestra el botón «Resolver
+con Tuqui», en los dos diálogos donde Odoo los muestra:
+
+- `WarningDialog`: el error de una acción (un botón, archivar) y, desde Odoo 19,
+  también el del botón Guardar.
+- `FormErrorDialog` («Oh snap!»): el error de guardar al salir del registro (el
+  paginador, «Nuevo», una acción con el formulario modificado) y, en Odoo 18,
+  también el del botón Guardar. Acá el botón hace lo mismo que «Quedarme»: el
+  formulario conserva los cambios.
+
+Un traceback no lo muestra, porque es un bug. Tampoco lo muestran `AccessError`,
+`MissingError` ni `RedirectWarning`, ni un timeout (504).
+
+El botón cierra el diálogo y abre el panel. El host postea una sola vez:
+
+```jsonc
+{ "source": "tuqui-odoo", "type": "ask",
+  "payload": { "error": {
+    "kind": "user_error",          // o "validation_error"
+    "title": "Operación no válida", // el título del diálogo, en el idioma de la persona
+    "message": "…" } } }           // el texto del error, hasta 4000 caracteres
+```
+
+- **Cuándo sale:** con el panel cerrado, justo después de `auth`, y esa apertura
+  no manda `resume`. Con el panel abierto y la sesión hecha, enseguida.
+- **Del lado del SPA:** lo guarda hasta que el chat está montado, abre un chat
+  nuevo sin agente (el error lo contesta Tuqui, aunque la conversación anterior
+  tuviera uno) y manda el error como mensaje de la persona, con esta forma fija:
+
+  ```text
+  Odoo me mostró este error. Ayudame a resolverlo.
+
+  El error, tal como lo mostró Odoo:
+  «<title>
+  <message>»
+  ```
+
+  El error va citado porque puede traer datos que cargó otra persona (el nombre
+  de un contacto que entró por un formulario web): es lo que mostró Odoo, no un
+  pedido. Sin `title`, va solo el `message`. En inglés: «Odoo showed me this
+  error. Help me solve it.» y «The error, as Odoo showed it:», entre comillas
+  dobles. El turno lleva el contexto de la pantalla como cualquier otro.
+- **Siempre en un chat nuevo**, también con el panel abierto en otra
+  conversación: la anterior queda en el menú, y si Tuqui estaba respondiendo,
+  esa respuesta termina igual en el servidor.
+- **No nombra ninguna skill.** El módulo lo usan todos los partners: Tuqui elige
+  la skill por su descripción. Para que la elija, la descripción de la skill
+  tiene que decir que se carga con un mensaje de esta forma.
 
 ## Selección de lista y multi-registro
 

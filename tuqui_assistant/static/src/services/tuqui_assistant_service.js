@@ -972,6 +972,9 @@ export const APPLY_RESULT_KINDS = ["form_changes", "form_html", "chatter", "show
 // The `navigate` modes this host opens (announced in `capabilities`).
 export const NAVIGATE_MODES = ["record", "new", "browse", "action"];
 
+/** Longest title or message an `ask` carries: the SPA cuts at the same size. */
+export const ASK_TEXT_MAX = 4000;
+
 // How long a mark by name keeps looking before it says the name is not on screen: a
 // view just opened draws its controls up to a second later.
 const POINT_PATIENCE_MS = 3000;
@@ -1271,6 +1274,8 @@ export const tuquiAssistantService = {
             minimized: Boolean(_savedState.minimized),
             expanded: Boolean(_savedState.expanded),
             context: null,
+            // An Odoo error the person sent to Tuqui, waiting for the panel to post it.
+            pendingAsk: null,
         });
 
         function _saveState() {
@@ -1663,6 +1668,25 @@ export const tuquiAssistantService = {
             state.panelOpen = false;
             state.minimized = false;
             state.expanded = false;
+            state.pendingAsk = null;
+            _saveState();
+        }
+
+        /**
+         * «Solve with Tuqui» on an error dialog: show the panel and leave the
+         * error for it to post as `ask`. The SPA opens a new chat with it. It
+         * names no skill: Tuqui picks one by its description.
+         *
+         * @param {{kind: string, title: string, message: string}} error
+         */
+        function askAboutError({ kind, title, message }) {
+            state.pendingAsk = {
+                kind,
+                title: String(title || "").slice(0, ASK_TEXT_MAX),
+                message: String(message || "").slice(0, ASK_TEXT_MAX),
+            };
+            state.panelOpen = true;
+            state.minimized = false;
             _saveState();
         }
         function expand() {
@@ -3140,6 +3164,7 @@ export const tuquiAssistantService = {
             minimize,
             restore,
             close,
+            askAboutError,
             expand,
             contract,
             applyProposal,
