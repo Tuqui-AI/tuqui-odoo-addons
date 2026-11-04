@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<templates xml:space="preserve">
+    <t t-name="tuqui_assistant.AskErrorButton">
+        <button t-if="this.tuquiAskKind" class="btn btn-secondary o-tuqui-ask-error" t-on-click="this.onTuquiAsk">
+            <img class="o-tuqui-ask-error-icon me-1" src="/tuqui_assistant/static/img/tuqui-smile.svg" alt=""/>
+            Solve with Tuqui
+        </button>
+    </t>
+
+    <t t-inherit="web.WarningDialog" t-inherit-mode="extension">
+        <xpath expr="//t[@t-set-slot='footer']" position="inside">
+            <t t-call="tuqui_assistant.AskErrorButton"/>
+        </xpath>
+    </t>
+
+    <t t-inherit="web.FormErrorDialog" t-inherit-mode="extension">
+        <xpath expr="//t[@t-set-slot='footer']" position="inside">
+            <t t-call="tuqui_assistant.AskErrorButton"/>
+        </xpath>
+    </t>
+</templates>

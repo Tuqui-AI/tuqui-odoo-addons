@@ -131,6 +131,7 @@ export function sizeForWidth(width) {
  *              { source: "tuqui-odoo", type: "resume",   payload: { path } }
  *              { source: "tuqui-odoo", type: "layout",   payload: { docked } }
  *              { source: "tuqui-odoo", type: "toggle-menu" }
+ *              { source: "tuqui-odoo", type: "ask",      payload: { error: { kind, title, message } } }  // «Solve with Tuqui»
  *  SPA → Odoo: { source: "tuqui-spa",  type: "ready" }
  *              { source: "tuqui-spa",  type: "error" }   // crashed before "ready": show the block now
  *              { source: "tuqui-spa",  type: "apply",    payload: { changes, rationale } }
@@ -275,6 +276,7 @@ export class TuquiPanel extends Component {
                     this.ui.connectionLost = false;
                     this._armEmbedWatchdog();
                     this._authPosted = false;
+                    this._authSent = false;
                     this._menuHintDone = false;
                     this.ui.menuHint = false;
                     this._lastSpaPath = null;
@@ -302,6 +304,17 @@ export class TuquiPanel extends Component {
                 }
             },
             () => [this.state.panelOpen]
+        );
+
+        // An error sent while the chat already has its session goes now; before
+        // that, it goes right after `auth` (see _postAuth).
+        useLayoutEffect(
+            (ask) => {
+                if (ask && this._authSent) {
+                    this._postPendingAsk();
+                }
+            },
+            () => [this.state.pendingAsk]
         );
 
         // postMessage bridge with the SPA iframe.
@@ -649,6 +662,7 @@ export class TuquiPanel extends Component {
     // A retry needs a fresh nonce: the pre-minted one may be spent or expired.
     _resetAuth() {
         this._authPosted = false;
+        this._authSent = false;
         this._ssoAuthPromise = null;
     }
 
@@ -701,15 +715,41 @@ export class TuquiPanel extends Component {
             // tab triggered by an external-link signal). Deliberate close → reopen
             // from the systray should start a fresh chat, not resume. The one-time
             // flag is consumed here so any subsequent open in this session starts fresh.
-            if (this.ui.storedPath && this.tuquiAssistant.consumeResumeOnOpen()) {
+            // An error sent to Tuqui opens its own new chat: no resume.
+            if (this.ui.storedPath && this.tuquiAssistant.consumeResumeOnOpen() && !this.state.pendingAsk) {
                 win.postMessage(
                     { source: "tuqui-odoo", type: "resume", payload: { path: this.ui.storedPath } },
                     this._spaOrigin
                 );
             }
+            this._authSent = true;
+            this._postPendingAsk();
         } catch {
             // different origin / iframe not yet navigated: retried on the next "ready"
             this._resetAuth();
+        }
+    }
+
+    /**
+     * Post the error the person sent from a dialog, once. The SPA keeps it until
+     * its chat is mounted, so it may go before the session is hydrated.
+     */
+    _postPendingAsk() {
+        const error = this.state.pendingAsk;
+        const win = this.iframeRef()?.contentWindow;
+        if (!error || !win || !this._spaOrigin) {
+            return;
+        }
+        // A plain copy: the reactive proxy in the state cannot be cloned by postMessage.
+        const { kind, title, message } = error;
+        try {
+            win.postMessage(
+                { source: "tuqui-odoo", type: "ask", payload: { error: { kind, title, message } } },
+                this._spaOrigin
+            );
+            this.tuquiAssistant.state.pendingAsk = null;
+        } catch {
+            // different origin / iframe not yet navigated: sent again after the next auth.
         }
     }
 
