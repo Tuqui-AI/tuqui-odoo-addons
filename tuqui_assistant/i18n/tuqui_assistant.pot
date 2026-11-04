@@ -450,6 +450,12 @@ msgstr ""
 
 #. module: tuqui_assistant
 #. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/errors/error_dialog_patch.xml:0
+msgid "Solve with Tuqui"
+msgstr ""
+
+#. module: tuqui_assistant
+#. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/services/tuqui_assistant_service.js:0
 msgid "That is not a screen, so Tuqui did not open it."
 msgstr ""
