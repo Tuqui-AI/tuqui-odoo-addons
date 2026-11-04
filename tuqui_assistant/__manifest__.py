@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Assistant",
-    "version": "20.0.1.4.0",
+    "version": "20.0.1.5.0",
     "category": "Productivity",
     "summary": (
         "AI assistant embedded in your Odoo backend: a side panel that already knows the "
