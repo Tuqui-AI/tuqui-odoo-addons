@@ -49,6 +49,11 @@ class TestFrameOriginReport(TransactionCase):
         client._ensure_signing_key()
         cls.client = client
         cls.Client = cls.env["tuqui.oauth.client"]
+        # Start from no other origins: a build's own websites may carry a domain
+        # (e.g. http://localhost:8069) that would leak into the exact-list asserts.
+        if cls.env.get("website") is not None:
+            cls.env["website"].sudo().search([]).write({"domain": False})
+        cls.env["ir.config_parameter"].sudo().set_str("tuqui.extra_embed_origins", "")
 
     def _set_base_url(self, url):
         self.env["ir.config_parameter"].sudo().set_str("web.base.url", url)
@@ -113,9 +118,8 @@ class TestFrameOriginReport(TransactionCase):
 
         Nothing is deleted to set this up: Odoo refuses to unlink the default
         website, so clearing the table first turned the test into a UserError.
-        The assertions are containment, not equality, which is what this method
-        actually promises — it reports the domains it finds, and an instance may
-        have websites this test did not create.
+        `setUpClass` clears the domain of the websites already there instead,
+        so the list is exactly what this test created.
         """
         self._set_base_url("https://acme.saas.example")
         public_user = self.env.ref("base.public_user").id
@@ -126,9 +130,10 @@ class TestFrameOriginReport(TransactionCase):
         origins = self.Client._declared_frame_origins()
 
         self.assertEqual(origins[0], "https://acme.saas.example", "the canonical URL comes first")
-        self.assertIn("https://www.acme.example", origins)
         # Bare in the record, full origin out: what an admin types is not an origin.
-        self.assertIn("https://www.globex.example", origins)
+        self.assertCountEqual(
+            origins, ["https://acme.saas.example", "https://www.acme.example", "https://www.globex.example"]
+        )
 
     def test_a_domain_named_by_both_sources_is_declared_once(self):
         """The canonical URL is often also a website's domain, and reporting it
