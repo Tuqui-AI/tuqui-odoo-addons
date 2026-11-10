@@ -337,6 +337,7 @@ class TestTuquiRpcGateway(HttpCase):
         untyped_reads = (
             "get_view",  # integrations/odoo/search_view.py
             "check_access_rights",  # integrations/odoo/adapter.py ← open_odoo_view
+            "tuqui_render_report",  # integrations/odoo/adapter.py ← odoo_report
         )
         # Not called yet, but on the list because they are the natural vector of
         # the view-metadata work. Asserted one by one on purpose: a
@@ -373,6 +374,14 @@ class TestTuquiRpcGateway(HttpCase):
         self.assertEqual(_classify("name_get"), "read")
         allowed, reason = _evaluate_policy(True, "name_get", "read", is_connection=False)
         self.assertTrue(allowed, reason)
+
+    def test_render_report_runs_only_as_a_user(self):
+        """A read-only member may print; the connection path, as superuser, may not."""
+        allowed, reason = _evaluate_policy(True, "tuqui_render_report", "read", is_connection=False)
+        self.assertTrue(allowed, reason)
+        allowed, reason = _evaluate_policy(False, "tuqui_render_report", "read", is_connection=True)
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "requires_acting_user")
 
     def test_only_as_a_user_entries_classify_as_read(self):
         """Every `_ONLY_AS_A_USER` name must also be in `_READ_METHODS`.

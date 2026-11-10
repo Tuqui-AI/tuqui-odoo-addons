@@ -3,3 +3,4 @@ from . import tuqui_access_log
 from . import tuqui_activation_nonce
 from . import tuqui_health
 from . import res_config_settings
+from . import ir_actions_report
