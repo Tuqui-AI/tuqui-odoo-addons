@@ -118,6 +118,8 @@ _READ_METHODS = frozenset(
         "web_read",
         "web_search_read",
         "web_read_group",
+        # Prints a PDF report (models/ir_actions_report.py) without storing it.
+        "tuqui_render_report",
     }
 )
 _READ_PREFIXES = ("search", "read")
@@ -143,7 +145,8 @@ _READ_PREFIXES = ("search", "read")
 # code: `_evaluate_policy` returns `connection_read_only` for a non-read
 # before it ever looks here, and the audit log would carry the wrong reason.
 # `test_only_as_a_user_entries_classify_as_read` holds that invariant.
-_ONLY_AS_A_USER = frozenset({"has_access", "has_group", "has_groups"})
+# `tuqui_render_report` is here because as superuser it would print any record.
+_ONLY_AS_A_USER = frozenset({"has_access", "has_group", "has_groups", "tuqui_render_report"})
 
 
 # L1: read_only is enforced by method-NAME classification, not at the cursor

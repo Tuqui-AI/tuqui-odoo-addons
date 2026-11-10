@@ -13,3 +13,4 @@ from . import test_embed_origin_report
 from . import test_neutralize
 from . import test_test_copy
 from . import test_issue_activation_code
+from . import test_render_report
