@@ -261,7 +261,7 @@ class IrActionsServer(models.Model):
         events = self.env["tuqui.event"]
         trigger_ref = self._tuqui_notify_trigger_ref()
         for record in records:
-            events |= events.enqueue(
+            events |= events._enqueue(
                 self.tuqui_agent_id, record._name, record.id, trigger_ref=trigger_ref, chain_depth=chain_depth
             )
         if events:

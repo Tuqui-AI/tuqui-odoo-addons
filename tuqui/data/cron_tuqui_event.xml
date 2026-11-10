@@ -2,22 +2,21 @@
 <odoo noupdate="1">
 
     <!--
-        The dispatcher. Every minute, because the whole point of the queue is
-        that an event survives a Tuqui outage without anybody noticing the
-        delay — an hourly cron would turn a thirty-second blip into an hour of
-        latency for every event behind it.
+        The dispatcher. An event leaves within seconds because queuing it wakes
+        this cron (`_trigger`, saved in the same transaction), and each retry
+        wakes it again at its time. The interval is only a far-off safety net,
+        so a database that never queues anything never runs it.
 
-        Cheap when idle: one indexed lookup on (state, next_attempt_at) that
-        returns nothing. Most databases that install the companion will never
-        enqueue a single row, and this has to cost them nothing.
+        Existing databases get the new interval from the 18.0.1.22.0 migration:
+        this record is noupdate.
     -->
     <record id="ir_cron_tuqui_event_dispatch" model="ir.cron">
         <field name="name">Tuqui: deliver queued events</field>
         <field name="model_id" ref="model_tuqui_event"/>
         <field name="state">code</field>
         <field name="code">model._cron_dispatch()</field>
-        <field name="interval_number">1</field>
-        <field name="interval_type">minutes</field>
+        <field name="interval_number">9999</field>
+        <field name="interval_type">months</field>
         <field name="active">True</field>
     </record>
 

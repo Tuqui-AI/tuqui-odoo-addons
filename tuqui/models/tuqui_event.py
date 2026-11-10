@@ -211,8 +211,11 @@ class TuquiEvent(models.Model):
     # ---------- Enqueue ----------
 
     @api.model
-    def enqueue(self, agent_external_id, res_model, res_id, trigger_ref=None, chain_depth=0):
-        """Record one event owed to Tuqui. Does no HTTP.
+    def _enqueue(self, agent_external_id, res_model, res_id, trigger_ref=None, chain_depth=0):
+        """Record one event owed to Tuqui, and wake the dispatcher. Does no HTTP.
+
+        Private: it creates the row with ``sudo``, so over RPC any logged-in user
+        could queue a signed event about any record.
 
         Called from the server action, so it runs inside the transaction of the
         write that triggered it. That is the entire reliability guarantee: if
@@ -244,7 +247,22 @@ class TuquiEvent(models.Model):
             values["trigger_ref"] = trigger_ref
         if chain_depth:
             values["chain_depth"] = chain_depth
-        return self.sudo().create(values)
+        event = self.sudo().create(values)
+        # Saved in this same transaction (ir_cron_trigger): a rollback drops the
+        # wake-up along with the row, and a commit cannot lose it.
+        self._wake_dispatcher()
+        return event
+
+    @api.model
+    def _wake_dispatcher(self, at=None):
+        """Ask the dispatch cron to run now, or at ``at``.
+
+        The cron's own interval is a far-off safety net: what makes an event
+        leave within seconds is this trigger, the pattern Odoo's own AI crons use.
+        """
+        cron = self.env.ref("tuqui.ir_cron_tuqui_event_dispatch", raise_if_not_found=False)
+        if cron:
+            cron.sudo()._trigger(at=at)
 
     # ---------- Manual retry ----------
 
@@ -266,6 +284,7 @@ class TuquiEvent(models.Model):
                     "last_error": False,
                 }
             )
+        self._wake_dispatcher()
         return True
 
     # ---------- Retention ----------
@@ -311,6 +330,7 @@ class TuquiEvent(models.Model):
             order="next_attempt_at asc, id asc",
         )
         if not due:
+            self._wake_for_next_pending()
             return
 
         _logger.info("tuqui.event: dispatching %s event(s)", len(due))
@@ -324,6 +344,20 @@ class TuquiEvent(models.Model):
                     len(due) - position,
                 )
                 break
+        self._wake_for_next_pending()
+
+    @api.model
+    def _wake_for_next_pending(self):
+        """Schedule the next run for the earliest pending event, if any.
+
+        Covers what a single run leaves behind (more than one batch, or out of
+        time) and rows queued before the dispatcher was woken by triggers.
+        """
+        pending = self.sudo().search([("state", "=", "pending")], limit=1, order="next_attempt_at asc, id asc")
+        if pending:
+            now = fields.Datetime.now()
+            due_at = pending.next_attempt_at
+            self._wake_dispatcher(at=due_at if due_at and due_at > now else None)
 
     def _deliver(self, auto_commit=True):
         """Try once, and record what happened either way.
@@ -456,6 +490,8 @@ class TuquiEvent(models.Model):
         else:
             values["next_attempt_at"] = fields.Datetime.now() + _BACKOFF[attempt - 1]
         self.write(values)
+        if values.get("next_attempt_at"):
+            self._wake_dispatcher(at=values["next_attempt_at"])
 
     def _record_success(self, status_code):
         self.ensure_one()

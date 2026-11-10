@@ -2,7 +2,8 @@
 
 Coverage mirrors the acceptance criteria of reliable event delivery:
 
-* enqueueing does no HTTP and records who caused the event;
+* enqueueing does no HTTP, records who caused the event, cannot be reached
+  over RPC, and wakes the dispatcher instead of waiting for its interval;
 * a failed delivery walks the backoff ladder and ends `failed`, never lost;
 * every attempt leaves its number, its HTTP status and its error on the row;
 * a failed event can be retried by hand, which is the recourse when Tuqui was
@@ -58,7 +59,7 @@ class TestTuquiEvent(TransactionCase):
         posted, a rollback of the triggering write would leave an event already
         delivered for a change that never happened."""
         with patch("odoo.addons.tuqui.models.tuqui_event.requests.post") as post:
-            event = self.Event.enqueue("agent-1", "res.partner", 1)
+            event = self.Event._enqueue("agent-1", "res.partner", 1)
         post.assert_not_called()
         self.assertEqual(event.state, "pending")
         self.assertEqual(event.attempt, 0)
@@ -66,16 +67,31 @@ class TestTuquiEvent(TransactionCase):
     def test_enqueue_records_who_caused_it(self):
         """Read from the transaction that made the change, not reconstructed later
         by the cron running as its own user."""
-        event = self.Event.enqueue("agent-1", "res.partner", 1)
+        event = self.Event._enqueue("agent-1", "res.partner", 1)
         self.assertEqual(event.triggered_by_user_id, self.env.user)
 
     def test_every_event_gets_its_own_key(self):
         """The uuid names the delivery, not the record — that is what lets Tuqui
         dedup a retry a day later."""
-        first = self.Event.enqueue("agent-1", "res.partner", 1)
-        second = self.Event.enqueue("agent-1", "res.partner", 1)
+        first = self.Event._enqueue("agent-1", "res.partner", 1)
+        second = self.Event._enqueue("agent-1", "res.partner", 1)
         self.assertTrue(first.uuid)
         self.assertNotEqual(first.uuid, second.uuid)
+
+    def test_enqueue_is_not_reachable_over_rpc(self):
+        """It creates with sudo: as a public method, any logged-in user could queue
+        a signed event about any record."""
+        self.assertFalse(hasattr(self.Event, "enqueue"))
+        self.assertTrue(hasattr(self.Event, "_enqueue"))
+
+    def test_enqueue_wakes_the_dispatcher_now(self):
+        """An event leaves within seconds, not at the next tick of the cron."""
+        with patch.object(type(self.env["ir.cron"]), "_trigger", autospec=True) as trigger:
+            self.Event._enqueue("agent-1", "res.partner", 1)
+        trigger.assert_called_once()
+        cron, at = trigger.call_args.args[0], trigger.call_args.kwargs.get("at")
+        self.assertEqual(cron, self.env.ref("tuqui.ir_cron_tuqui_event_dispatch"))
+        self.assertIsNone(at)
 
     # ─── Delivery ─────────────────────────────────────────────────────────────
 
@@ -95,6 +111,24 @@ class TestTuquiEvent(TransactionCase):
         self.assertEqual(event.state, "pending")
         self.assertEqual(event.attempt, 1)
         self.assertGreater(event.next_attempt_at, before)
+
+    def test_a_failure_wakes_the_dispatcher_at_the_next_attempt(self):
+        event = self._event()
+        with (
+            patch("odoo.addons.tuqui.models.tuqui_event.requests.post", return_value=_Response(503, "down")),
+            patch.object(type(self.env["ir.cron"]), "_trigger", autospec=True) as trigger,
+        ):
+            event._post()
+        self.assertEqual(trigger.call_args.kwargs.get("at"), event.next_attempt_at)
+
+    def test_a_dispatch_that_leaves_events_behind_schedules_the_next_run(self):
+        """More than one batch, or out of time: the rest must not wait for the
+        cron's far-off interval."""
+        event = self._event()
+        event.next_attempt_at = fields.Datetime.add(fields.Datetime.now(), hours=1)
+        with patch.object(type(self.env["ir.cron"]), "_trigger", autospec=True) as trigger:
+            self.Event._cron_dispatch()
+        self.assertEqual(trigger.call_args.kwargs.get("at"), event.next_attempt_at)
 
     def test_each_attempt_records_status_and_error(self):
         event = self._event()
@@ -257,7 +291,7 @@ class TestTuquiEvent(TransactionCase):
 
     def test_the_payload_names_the_record_and_the_person_and_nothing_else(self):
         """A notification, never an instruction: Tuqui reads the record itself."""
-        event = self.Event.enqueue("agent-1", "res.partner", 7)
+        event = self.Event._enqueue("agent-1", "res.partner", 7)
         payload = event._payload()
         self.assertEqual(
             set(payload),
