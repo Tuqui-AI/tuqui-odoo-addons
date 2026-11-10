@@ -46,7 +46,7 @@ class TestTuquiNeutralize(TransactionCase):
         self.assertFalse(pending.exists())
         self.assertTrue(sent.exists(), "delivery history stays")
         # Nothing the copy enqueues leaves it signed as production.
-        late = Event.enqueue("agent-1", "res.partner", 1)
+        late = Event._enqueue("agent-1", "res.partner", 1)
         with patch("odoo.addons.tuqui.models.tuqui_event.requests.post") as post:
             late._deliver(auto_commit=False)
         post.assert_not_called()
