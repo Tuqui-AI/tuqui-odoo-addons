@@ -1,6 +1,6 @@
 {
     "name": "Tuqui Companion - WhatsApp",
-    "version": "19.0.0.2.0",
+    "version": "19.0.0.3.0",
     "category": "Productivity",
     "summary": "A Tuqui agent answers a WhatsApp number of this Odoo, published from Tuqui, without automation rules.",
     "author": "Tuqui-AI",
