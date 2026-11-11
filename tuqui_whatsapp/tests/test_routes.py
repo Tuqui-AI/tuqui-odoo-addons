@@ -90,11 +90,7 @@ class TestTuquiWhatsappRoutes(TuquiWhatsappCase):
         resp = self._call("/tuqui_whatsapp/bind", {"account_id": self.whatsapp_account_2.id, "agent_id": "agent-2"})
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertEqual(self.whatsapp_account_2.sudo().tuqui_agent_external_id, "agent-2")
-        self.assertEqual(resp.json()["account"]["mode"], "suggest")
-        resp = self._call(
-            "/tuqui_whatsapp/bind", {"account_id": self.whatsapp_account_2.id, "agent_id": "agent-2", "mode": "send"}
-        )
-        self.assertEqual(self.whatsapp_account_2.sudo().tuqui_mode, "send")
+        self.assertNotIn("mode", resp.json()["account"])
         resp = self._call("/tuqui_whatsapp/bind", {"account_id": self.whatsapp_account_2.id, "agent_id": None})
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertFalse(self.whatsapp_account_2.sudo().tuqui_agent_external_id)
@@ -149,20 +145,9 @@ class TestTuquiWhatsappRoutes(TuquiWhatsappCase):
         self.assertEqual(resp.json()["error"]["code"], "window_closed")
         self.assertFalse(self._wa_msg_sent)
 
-    def test_a_number_published_to_suggest_never_sends(self):
-        self.whatsapp_account.sudo().tuqui_mode = "suggest"
-        self._receive(self.channel, "hola")
-        with self.mockWhatsappGateway():
-            refused = self._reply()
-            note = self._reply(mode="note", key="run-1:2")
-        self.assertEqual(refused.status_code, 409, refused.text)
-        self.assertEqual(refused.json()["error"]["code"], "suggest_only")
-        self.assertEqual(note.status_code, 200, note.text)
-        self.assertFalse(self._wa_msg_sent)
-
     def test_note_stays_in_odoo(self):
         with self.mockWhatsappGateway():
-            resp = self._reply(text="Respuesta sugerida", mode="note")
+            resp = self._reply(text="Derivado por Tuqui", mode="note")
         self.assertEqual(resp.status_code, 200, resp.text)
         message = self.env["mail.message"].browse(resp.json()["message_id"])
         self.assertEqual(message.message_type, "comment")

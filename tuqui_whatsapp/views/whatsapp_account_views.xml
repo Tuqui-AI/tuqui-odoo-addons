@@ -8,7 +8,6 @@
             <xpath expr="//sheet" position="inside">
                 <group string="Tuqui" groups="base.group_system" invisible="not tuqui_agent_external_id">
                     <field name="tuqui_agent_external_id"/>
-                    <field name="tuqui_mode"/>
                 </group>
             </xpath>
         </field>

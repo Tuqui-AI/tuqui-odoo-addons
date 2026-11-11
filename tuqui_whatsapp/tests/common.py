@@ -27,7 +27,7 @@ class TuquiWhatsappCase(WhatsAppCommon, MockIncomingWhatsApp):
         )
         with skip_vat:
             super().setUpClass()
-        cls.whatsapp_account.sudo().write({"tuqui_agent_external_id": AGENT, "tuqui_mode": "send"})
+        cls.whatsapp_account.sudo().write({"tuqui_agent_external_id": AGENT})
         cls.channel = cls.env["discuss.channel"].create(
             {
                 "channel_partner_ids": [(4, cls.user_wa_admin.partner_id.id)],
