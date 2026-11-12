@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="whatsapp_account_view_form" model="ir.ui.view">
+        <field name="name">whatsapp.account.view.form.tuqui</field>
+        <field name="model">whatsapp.account</field>
+        <field name="inherit_id" ref="whatsapp.whatsapp_account_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="inside">
+                <group string="Tuqui" groups="base.group_system" invisible="not tuqui_agent_external_id">
+                    <field name="tuqui_agent_external_id"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -5,3 +5,4 @@ from . import tuqui_event
 from . import ir_actions_server
 from . import res_config_settings
 from . import tuqui_health
+from . import ir_actions_report
