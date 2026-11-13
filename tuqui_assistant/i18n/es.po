@@ -458,6 +458,13 @@ msgstr "Abrir en Tuqui"
 
 #. module: tuqui_assistant
 #. odoo-javascript
+#: code:addons/tuqui_assistant/static/src/panel/panel.js:0
+#: code:addons/tuqui_assistant/static/src/systray/systray.js:0
+msgid "Unread notices in Tuqui"
+msgstr "Avisos sin leer en Tuqui"
+
+#. module: tuqui_assistant
+#. odoo-javascript
 #: code:addons/tuqui_assistant/static/src/panel/panel.xml:0
 msgid "Opening Tuqui…"
 msgstr "Abriendo Tuqui…"
