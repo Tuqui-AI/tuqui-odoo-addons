@@ -1276,6 +1276,9 @@ export const tuquiAssistantService = {
             context: null,
             // An Odoo error the person sent to Tuqui, waiting for the panel to post it.
             pendingAsk: null,
+            // Rows of Tuqui's notices with something unread, as the chat reports it
+            // (`unread` message). Unknown until the panel opened once this session.
+            unreadNotices: 0,
         });
 
         function _saveState() {
@@ -1669,6 +1672,8 @@ export const tuquiAssistantService = {
             state.minimized = false;
             state.expanded = false;
             state.pendingAsk = null;
+            // The chat that reported it is gone: nobody would clear the dot.
+            state.unreadNotices = 0;
             _saveState();
         }
 
@@ -1692,6 +1697,10 @@ export const tuquiAssistantService = {
         function expand() {
             state.expanded = true;
             _saveState();
+        }
+        /** What the chat says is unread: the systray dot reads it. */
+        function setUnreadNotices(count) {
+            state.unreadNotices = Number.isInteger(count) && count > 0 ? count : 0;
         }
         function contract() {
             state.expanded = false;
@@ -3151,6 +3160,7 @@ export const tuquiAssistantService = {
 
         return {
             state,
+            setUnreadNotices,
             point,
             pointByName,
             pointWhenThere,
