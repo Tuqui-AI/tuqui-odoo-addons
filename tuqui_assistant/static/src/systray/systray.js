@@ -31,6 +31,16 @@ export class TuquiSystray extends Component {
         return _t("Hide Tuqui");
     }
 
+    get noticesLabel() {
+        return _t("Unread notices in Tuqui");
+    }
+
+    /** Title and accessible name of the button: what the click does, plus the dot. */
+    get buttonLabel() {
+        const action = this.showing ? this.hideLabel : this.showLabel;
+        return this.state.unreadNotices ? `${action} · ${this.noticesLabel}` : action;
+    }
+
     onClick() {
         this.tuquiAssistant.toggleVisibility();
     }

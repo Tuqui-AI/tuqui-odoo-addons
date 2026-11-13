@@ -155,8 +155,11 @@
              Odoo's chat bubbles, stacked above them (panel.js measures their
              column). Clicking it brings the same conversation back. -->
         <button t-if="this.state.panelOpen and this.state.minimized" class="o-tuqui-launcher"
-                t-on-click="this.restore" t-att-title="this.restoreLabel" t-att-aria-label="this.restoreLabel">
-            <img src="/tuqui_assistant/static/img/tuqui-smile.svg" alt=""/>
+                t-on-click="this.restore" t-att-title="this.launcherLabel" t-att-aria-label="this.launcherLabel">
+            <span class="o-tuqui-launcher-face">
+                <img src="/tuqui_assistant/static/img/tuqui-smile.svg" alt=""/>
+            </span>
+            <span t-if="this.state.unreadNotices" class="o-tuqui-notice-dot" aria-hidden="true"/>
         </button>
     </t>
 </templates>

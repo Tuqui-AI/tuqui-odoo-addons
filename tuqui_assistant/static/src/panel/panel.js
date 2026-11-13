@@ -143,6 +143,7 @@ export function sizeForWidth(width) {
  *              { source: "tuqui-spa",  type: "save" }     // guardar el form abierto (lo pidió el usuario)
  *              { source: "tuqui-spa",  type: "point",    payload: { target, name, role } }  // mark a control of the screen's list
  *              { source: "tuqui-spa",  type: "point",    payload: { name, section, proposalId } }  // find it on screen now, answered in apply-result
+ *              { source: "tuqui-spa",  type: "unread",   payload: { count } }  // unread notices: the systray dot
  *              { source: "tuqui-spa",  type: "show-me",  payload: { goal, proposalId } }  // walk the screen to goal
  *              { source: "tuqui-spa",  type: "show-me-step-result", id, ok, result | error }
  *              { source: "tuqui-spa",  type: "wait-step", payload: { proposalId, kind: "wait_step", waiting_line, done_line } }  // wait in silence
@@ -241,6 +242,10 @@ export class TuquiPanel extends Component {
             this.ui.connected = Boolean(boot?.connected);
             this.ui.baseUrl = boot?.base_url || null;
             this.ui.slug = boot?.slug || null;
+            if (!this.ui.connected || !this.ui.slug) {
+                // No chat is mounted to report notices any more.
+                this.tuquiAssistant.setUnreadNotices(0);
+            }
             this.ui.originAuthorized = boot?.origin_authorized !== false;
             this.ui.mainOrigin = boot?.main_origin || null;
             // Restore the last conversation from localStorage (keyed by slug to
@@ -1105,6 +1110,10 @@ export class TuquiPanel extends Component {
                     this._postSwitchCompanyFailed(data.payload?.companyId);
                 }
                 break;
+            case "unread":
+                // Unread notices count from the chat; the systray dot reads it.
+                this.tuquiAssistant.setUnreadNotices(data.payload?.count);
+                break;
             case "location":
                 // The SPA reports its current standalone-equivalent path
                 // (`/w/:slug/...`) on every embed route change. Stored so "Open in
@@ -1165,6 +1174,10 @@ export class TuquiPanel extends Component {
     }
     get restoreLabel() {
         return _t("Open Tuqui");
+    }
+    /** Title and accessible name of the minimized bubble: what the click does, plus the dot. */
+    get launcherLabel() {
+        return this.state.unreadNotices ? `${this.restoreLabel} · ${_t("Unread notices in Tuqui")}` : this.restoreLabel;
     }
     get expandLabel() {
         return _t("Expand");
