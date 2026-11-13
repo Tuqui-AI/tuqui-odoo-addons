@@ -30,7 +30,7 @@ class TestTuquiWhatsappInbound(TuquiWhatsappCase):
         self.assertEqual(values["message_id"], message.id)
         self.assertEqual(values["account_id"], self.whatsapp_account.id)
         self.assertEqual(values["phone_uid"], self.whatsapp_account.phone_uid)
-        self.assertEqual(values["mode"], "send")
+        self.assertNotIn("mode", values)
         self.assertTrue(values["author"]["is_customer"])
         self.assertEqual(values["author"]["partner_id"], self.whatsapp_customer.id)
 

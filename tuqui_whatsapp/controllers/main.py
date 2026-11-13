@@ -21,7 +21,6 @@ from ..models.discuss_channel import MAX_TEXT
 _logger = logging.getLogger(__name__)
 
 _MODES = ("send", "note")
-_ACCOUNT_MODES = ("suggest", "send")
 
 
 class TuquiWhatsappController(http.Controller):
@@ -43,9 +42,6 @@ class TuquiWhatsappController(http.Controller):
         agent = body.get("agent_id") or False
         if agent and not isinstance(agent, str):
             return _error("bad_request", "agent_id must be a string or null", 400)
-        account_mode = body.get("mode") or "suggest"
-        if account_mode not in _ACCOUNT_MODES:
-            return _error("bad_request", f"mode must be one of {_ACCOUNT_MODES}", 400)
         current = account.tuqui_agent_external_id
         expected = body.get("expected_agent_id")
         if expected is not None and (current or None) != expected:
@@ -55,8 +51,8 @@ class TuquiWhatsappController(http.Controller):
         if agent and current and current != agent and not body.get("replace"):
             # Two agents on one number would answer the same customer twice.
             return _error("taken", "Another Tuqui agent answers this number", 409, account=_account_values(account))
-        account.write({"tuqui_agent_external_id": agent, "tuqui_mode": account_mode})
-        _logger.info("tuqui_whatsapp: account %s bound to agent %s (%s)", account.id, agent or "-", account_mode)
+        account.write({"tuqui_agent_external_id": agent})
+        _logger.info("tuqui_whatsapp: account %s bound to agent %s", account.id, agent or "-")
         return _json({"account": _account_values(account)})
 
     @http.route("/tuqui_whatsapp/reply", type="http", auth="none", methods=["POST"], csrf=False, readonly=False)
@@ -88,9 +84,6 @@ class TuquiWhatsappController(http.Controller):
                 return _error("bad_request", "reply_key already used in another chat", 400)
             return _json(_reply_values(previous, duplicate=True))
 
-        if mode == "send" and channel.wa_account_id.tuqui_mode != "send":
-            # A number published to suggest never writes to the customer, whatever Tuqui asks.
-            return _error("suggest_only", "This number is published to suggest, not to send", 409)
         if mode == "send" and not channel.whatsapp_channel_active:
             return _error("window_closed", "The 24-hour window of this chat is closed", 409)
 
@@ -134,7 +127,6 @@ def _account_values(account):
         "active": account.active,
         "phone_uid": account.phone_uid,
         "agent_id": account.tuqui_agent_external_id or None,
-        "mode": account.tuqui_mode,
     }
 
 

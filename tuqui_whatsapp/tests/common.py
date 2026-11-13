@@ -17,7 +17,7 @@ class TuquiWhatsappCase(WhatsAppCommon, MockIncomingWhatsApp):
         # company with a local VAT number, the sync validates it against Belgium.
         with patch.object(ResPartner, "_run_vat_checks", lambda self, country, vat, *args, **kwargs: (vat, False)):
             super().setUpClass()
-        cls.whatsapp_account.sudo().write({"tuqui_agent_external_id": AGENT, "tuqui_mode": "send"})
+        cls.whatsapp_account.sudo().write({"tuqui_agent_external_id": AGENT})
         cls.channel = cls.env["discuss.channel"].create(
             {
                 "channel_partner_ids": [(4, cls.user_wa_admin.partner_id.id)],

@@ -53,7 +53,6 @@ class DiscussChannel(models.Model):
         return {
             "account_id": self.wa_account_id.id,
             "phone_uid": self.wa_account_id.sudo().phone_uid or None,
-            "mode": self.wa_account_id.sudo().tuqui_mode,
             "channel_id": self.id,
             "message_id": message.id,
             "parent_message_id": message.parent_id.id or None,
