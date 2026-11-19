@@ -10,6 +10,9 @@ actually searched. The rule:
 - codes with digits (``PR-979``, ``FURN_7800``) and emails are one term, and a
   code's digit parts are its fallback: "979" finds "PR-979", and "FURN_7800"
   does not match "FURNX7800";
+- a number is also indexed without its padding zeros, and a word that ends in
+  digits also by that number: "3209" finds "0001-00003209", "15482" finds
+  "SO15482";
 - Spanish function words out;
 - terms shorter than 3 characters out, unless they carry a digit;
 - at most ``MAX_TERMS``: codes first, then the longest, then alphabetical.
@@ -84,6 +87,18 @@ def _has_digit(token):
     return any(char.isdigit() for char in token)
 
 
+_TAIL_RE = re.compile(r"(?<=[^\W\d_])\d+$")
+
+
+def number_of(part):
+    """The number a part also stands for, or ``None``: "00003209" → "3209", "so15482" → "15482"."""
+    digits = part if part.isdigit() else next(iter(_TAIL_RE.findall(part)), None)
+    if digits is None:
+        return None
+    number = digits.lstrip("0") or "0"
+    return number if number != part else None
+
+
 def is_searchable(term):
     """Whether a folded token can ever be a query term (and so is worth indexing)."""
     if len(term) > MAX_LEXEME_CHARS or term in STOPWORDS:
@@ -138,7 +153,8 @@ def lexemes(text):
 
     Positions count every run, stopwords included, so the distance between two
     terms is the real one; only searchable lexemes come out. A whole code or
-    email takes the position of its first part.
+    email takes the position of its first part, and a part's number (``number_of``)
+    the position of the part.
     """
     position = 0
     for whole, parts in _pieces(text):
@@ -147,6 +163,9 @@ def lexemes(text):
             position += 1
             if is_searchable(part):
                 yield part, min(position, MAX_POSITION)
+            number = number_of(part)
+            if number is not None and is_searchable(number):
+                yield number, min(position, MAX_POSITION)
         if whole is not None and is_searchable(whole):
             yield whole, min(first, MAX_POSITION)
 
@@ -215,7 +234,11 @@ def snippet(text, terms, prefixes=None):
     # A whole code shows up in the text as its parts.
     wanted = set(terms) | {part for term in terms for part in _TOKEN_RE.findall(term)}
     folded = [fold(word.group()) for word in words]
-    hits = [index for index, term in enumerate(folded) if term in wanted or (prefixes and term.startswith(prefixes))]
+    hits = [
+        index
+        for index, term in enumerate(folded)
+        if term in wanted or number_of(term) in wanted or (prefixes and term.startswith(prefixes))
+    ]
     start = 0
     if hits:
         best = -1
@@ -237,7 +260,7 @@ def snippet(text, terms, prefixes=None):
 # ``lexemes``, ``normalize_query``). Word lists, patterns and limits need no bump:
 # they are part of the fingerprint below. ``test_the_rule_version_follows_the_rule``
 # fails when the output changes and neither did.
-RULE_REVISION = 1
+RULE_REVISION = 2
 
 
 def _rule_fingerprint():

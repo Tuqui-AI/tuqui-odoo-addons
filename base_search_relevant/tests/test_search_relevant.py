@@ -74,7 +74,7 @@ def _rule_behaviour():
     return digest.hexdigest()[:16]
 
 
-PINNED_RULE = ("c95c331bf112cba9", "ddb86630581b569e")
+PINNED_RULE = ("eeef85739acc82f5", "2930196e27ae32d2")
 
 
 @tagged("post_install", "-at_install", "base_search_relevant")
@@ -143,6 +143,15 @@ class TestSearchRelevantText(BaseCase):
         vector = text.build_tsvector([("A", "PR-979 de Siemens"), ("B", "motor de siemens")], extra_lexemes=["x:y"])
         self.assertEqual(vector, "'979':2A 'pr-979':1A 'siemens':4A,15B 'motor':13B 'x:y'")
         self.assertIsNone(text.build_tsvector([("A", "de la y o"), ("B", "")]))
+
+    def test_a_number_is_held_without_its_padding_zeros_or_the_letters_before_it(self):
+        """People say "3209" for "R 0001-00003209" and "15482" for "SO15482"."""
+        self.assertEqual(text.matched_terms("R 0001-00003209", ["3209", "0001"]), ["3209", "0001"])
+        self.assertEqual(text.matched_terms("SO15482", ["15482", "so15482"]), ["15482", "so15482"])
+        # Another number, not the same one with zeros in front.
+        self.assertEqual(text.matched_terms("R 0001-00013209 y 32090", ["3209"]), [])
+        self.assertEqual(text.number_of("10a"), None)
+        self.assertEqual(text.number_of("3209"), None)
 
     def test_the_rule_version_follows_the_rule(self):
         """N3: an index built by another rule must be re-indexed, so the version
@@ -2425,6 +2434,21 @@ class TestSearchRelevant(TransactionCase):
         self._index(config)
         response = self._search("PR-97913")
         self.assertEqual((response["terms"], self._ids(response)), (["97913"], [spaced.id]))
+
+    def test_a_number_finds_its_record_without_the_prefix_or_the_padding_zeros(self):
+        """Regression: "3209" did not find "R 0001-00003209", nor "15482" "SO15482":
+        the index held "00003209" and "so15482", and a number is searched exact.
+
+        Made-up numbers, as in the test above."""
+        config = self._enable()
+        padded = self.env["res.partner"].create({"name": "Remito R 0001-00083209"})
+        prefixed = self.env["res.partner"].create({"name": "Pedido SO96371"})
+        self.env["res.partner"].create({"name": "Remito R 0001-00183209 y R 0001-00832090"})
+        self._index(config)
+        self.assertEqual(self._ids(self._search("83209")), [padded.id])
+        self.assertEqual(self._ids(self._search("96371")), [prefixed.id])
+        # The code with its zeros left out falls back to its parts, and the record holds both.
+        self.assertEqual(self._ids(self._search("0001-83209"))[:1], [padded.id])
 
     def test_the_answer_says_which_terms_were_searched(self):
         """Regression: 'de la' answered complete and empty, and the agent was told
