@@ -965,8 +965,14 @@ export function switchCompany(company, companyId) {
     return true;
 }
 
-// Proposal kinds this host takes (announced in `capabilities`). All are answered with
-// `apply-result` but `wait_step`, which answers later with a `step-event`.
+// What both hosts (the embed and Tuqui's side panel) do on the screen, announced as
+// `capabilities.odoo_screen`. Tuqui keeps the list of tools for each version: it goes
+// up when a screen tool needs new code here.
+export const ODOO_SCREEN_VERSION = 1;
+
+// Proposal kinds this host takes. All are answered with `apply-result` but
+// `wait_step`, which answers later with a `step-event`. Announced as
+// `capabilities.apply_result` only for a Tuqui that predates `odoo_screen`.
 export const APPLY_RESULT_KINDS = ["form_changes", "form_html", "chatter", "show_me", "point", "wait_step"];
 
 // The `navigate` modes this host opens (announced in `capabilities`).

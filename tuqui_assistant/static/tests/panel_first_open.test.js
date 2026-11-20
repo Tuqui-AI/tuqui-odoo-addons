@@ -100,8 +100,10 @@ describe("SSO nonce on first open", () => {
                         client_id: "cid",
                         nonce: "n1",
                         capabilities: {
+                            odoo_screen: 1,
                             apply_result: ["form_changes", "form_html", "chatter", "show_me", "point", "wait_step"],
                             navigate: ["record", "new", "browse", "action"],
+                            switch_company: true,
                             menu_button: true,
                         },
                         lang: user.lang,

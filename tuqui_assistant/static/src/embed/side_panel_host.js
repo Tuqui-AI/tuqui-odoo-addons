@@ -1,8 +1,11 @@
 import { registry } from "@web/core/registry";
 import { session } from "@web/session";
+import { makeHostBridge } from "@tuqui_assistant/embed/host_bridge";
 import { isGotaMutation } from "@tuqui_assistant/screen/gota";
+import { ODOO_SCREEN_VERSION } from "@tuqui_assistant/services/tuqui_assistant_service";
 import { showMe } from "@tuqui_assistant/show_me/show_me";
-import { makeWalkSession, readProposalId } from "@tuqui_assistant/show_me/walk_session";
+import { makeWaitSession } from "@tuqui_assistant/show_me/wait_step";
+import { makeWalkSession } from "@tuqui_assistant/show_me/walk_session";
 
 /**
  * This Odoo shown in Tuqui's side panel: the same messages as the embed, with the
@@ -10,29 +13,44 @@ import { makeWalkSession, readProposalId } from "@tuqui_assistant/show_me/walk_s
  *
  *   Odoo → SPA: { source: "tuqui-odoo", type: "hello" }               // no data, so "*" is safe
  *               { source: "tuqui-odoo", type: "context", payload: PageContext }
- *               { source: "tuqui-odoo", type: "show-me-step", id, payload: { goal, screen, actions, history } }
- *               { source: "tuqui-odoo", type: "apply-result", payload: { proposalId, status, ... } }
  *   SPA → Odoo: { source: "tuqui-spa",  type: "ready" }               // fixes the origin
- *               { source: "tuqui-spa",  type: "point", payload: { target, name, role } }
- *               { source: "tuqui-spa",  type: "point", payload: { name, section, proposalId } }   // answered in apply-result
- *               { source: "tuqui-spa",  type: "show-me", payload: { goal, proposalId } }
- *               { source: "tuqui-spa",  type: "show-me-step-result", id, ok, result | error }
+ *
+ * Everything else is what the embed answers too (`host_bridge.js`): proposals for
+ * the open form, the chatter, saving, reloading, the drop, the walk and the wait.
  *
  * Only the panel session (`tuqui_embed_panel`, set by `tuqui_embed`) opens it, and
  * only the parent window is heard: `tuqui_embed`'s frame-ancestors already limits
- * who that parent can be. The proposals announced are the walk (`show_me`) and the
- * drop by name (`point`): the chat is not inside this Odoo, so it never edits forms here.
+ * who that parent can be. It does not navigate or switch companies: it announces
+ * neither, and those belong to the embed.
  */
 
 const SETTLE_MS = 400;
 
-export function makeSidePanelHost(assistant, win = window, walk = showMe) {
+// A Tuqui that predates `odoo_screen` reads this list; it offered only these here.
+const LEGACY_APPLY_RESULT = ["show_me", "point"];
+
+export function makeSidePanelHost(assistant, win = window, walk = showMe, waitOptions = {}) {
     let origin = null;
     let posted = null;
+    const send = (message) => win.parent.postMessage({ source: "tuqui-odoo", ...message }, origin);
     const walks = makeWalkSession({
-        post: (id, payload) => win.parent.postMessage({ source: "tuqui-odoo", type: "show-me-step", id, payload }, origin),
+        post: (id, payload) => send({ type: "show-me-step", id, payload }),
         getContext: () => assistant.state.context,
         walk,
+    });
+    const waits = makeWaitSession({ ...waitOptions, notify: (payload) => send({ type: "step-event", payload }) });
+    const bridge = makeHostBridge({
+        assistant,
+        post: send,
+        walks,
+        waits,
+        showMe: async (goal, proposalId, menu) => {
+            try {
+                return await walks.run(goal, proposalId, { menu });
+            } finally {
+                post(true);
+            }
+        },
     });
 
     /** Send the screen when it changed, or always when `force`. */
@@ -42,34 +60,17 @@ export function makeSidePanelHost(assistant, win = window, walk = showMe) {
             return;
         }
         const screen = assistant.readScreen();
-        const payload = { capabilities: { apply_result: ["show_me", "point"] }, ...assistant.getContextPayload(screen) };
+        const payload = {
+            capabilities: { odoo_screen: ODOO_SCREEN_VERSION, apply_result: LEGACY_APPLY_RESULT },
+            ...assistant.getContextPayload(screen),
+        };
         const key = JSON.stringify(payload);
         // Same list or not, the elements behind the ids may be new nodes.
         assistant.rememberScreen(screen);
         if (force || key !== posted) {
-            win.parent.postMessage({ source: "tuqui-odoo", type: "context", payload }, origin);
+            send({ type: "context", payload });
             posted = key;
         }
-    }
-
-    async function onShowMe(data) {
-        const proposalId = readProposalId(data);
-        if (!proposalId) {
-            return;
-        }
-        const result = await assistant.settleProposal(proposalId, () => walks.run(data.payload?.goal, proposalId, { menu: data.payload?.menu }));
-        win.parent.postMessage({ source: "tuqui-odoo", type: "apply-result", payload: { proposalId, ...result } }, origin);
-        post(true);
-    }
-
-    async function onPoint(data) {
-        const proposalId = readProposalId(data);
-        if (!proposalId) {
-            assistant.point(data.payload || {});
-            return;
-        }
-        const result = await assistant.settleProposal(proposalId, () => assistant.pointWhenThere(data.payload || {}));
-        win.parent.postMessage({ source: "tuqui-odoo", type: "apply-result", payload: { proposalId, ...result } }, origin);
     }
 
     function onMessage(event) {
@@ -78,8 +79,9 @@ export function makeSidePanelHost(assistant, win = window, walk = showMe) {
             return;
         }
         if (data.type === "ready") {
-            // A new ready is a chat that reloaded: a walk it asked for has nobody to answer it.
+            // A new ready is a chat that reloaded: a walk or a wait it asked for has nobody to answer it.
             walks.dispose("the chat reloaded");
+            waits.dispose();
             origin = event.origin;
             post(true);
             return;
@@ -87,16 +89,34 @@ export function makeSidePanelHost(assistant, win = window, walk = showMe) {
         if (!origin || event.origin !== origin) {
             return;
         }
-        if (data.type === "point") {
-            onPoint(data);
-        } else if (data.type === "show-me") {
-            onShowMe(data);
-        } else if (data.type === "show-me-step-result") {
-            walks.onStepResult(data);
+        if (!bridge.handle(data)) {
+            bridge.refuse(data);
         }
     }
 
-    return { onMessage, post };
+    return {
+        onMessage,
+        post,
+        get walking() {
+            return walks.walking;
+        },
+    };
+}
+
+/**
+ * Odoo focuses some fields by code as it draws a screen (the home's search, for one).
+ * Inside the panel that focus leaves the chat beside it, and what the person types
+ * there lands in Odoo. A focus by code is ignored while this frame does not have the
+ * focus, unless `mayFocus` says it is ours (the walk types in a box).
+ */
+export function guardFocus(win, mayFocus) {
+    const proto = win.HTMLElement.prototype;
+    const focus = proto.focus;
+    proto.focus = function (...args) {
+        if (win.document.hasFocus() || mayFocus()) {
+            return focus.apply(this, args);
+        }
+    };
 }
 
 export const sidePanelHostService = {
@@ -106,6 +126,7 @@ export const sidePanelHostService = {
             return;
         }
         const host = makeSidePanelHost(tuquiAssistant);
+        guardFocus(window, () => host.walking);
         window.addEventListener("message", host.onMessage);
         let timer = null;
         new MutationObserver((records) => {
