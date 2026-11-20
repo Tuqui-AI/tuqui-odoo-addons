@@ -582,6 +582,40 @@ def _agent_run_depth():
     return min(int(value), _MAX_CHAIN_DEPTH)
 
 
+# X-Tuqui-Acting-Uid value that asks for the uid the database declares in
+# ``tuqui.partner_support_uid``: the user a partner's team acts as in Odoo.
+_PARTNER_SUPPORT_MARKER = "support"
+_PARTNER_SUPPORT_PARAM = "tuqui.partner_support_uid"
+
+
+def _declared_partner_support_uid(env):
+    """The uid in ``tuqui.partner_support_uid``, or ``None`` when missing or not a number."""
+    raw = env["ir.config_parameter"].sudo().get_param(_PARTNER_SUPPORT_PARAM)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_partner_support_user(env):
+    """Resolve the support uid this database declares for its partner's team.
+
+    Returns ``(user, None)`` or ``(env['res.users'], 'partner_support_unavailable')``.
+    The declared user may be archived, but must be internal and not the
+    superuser. Any doubt is a refusal, never the connection identity.
+    """
+    empty = env["res.users"]
+    uid_int = _declared_partner_support_uid(env)
+    if uid_int is None:
+        return empty, "partner_support_unavailable"
+    if uid_int == SUPERUSER_ID:
+        return empty, "partner_support_unavailable"
+    user = env["res.users"].sudo().with_context(active_test=False).search([("id", "=", uid_int)], limit=1)
+    if not user or user.share:
+        return empty, "partner_support_unavailable"
+    return user, None
+
+
 def _resolve_acting_member(env, uid):
     """Resolve + vet the workspace member a member-path ORM call impersonates.
 
@@ -597,7 +631,13 @@ def _resolve_acting_member(env, uid):
       superuser, a share (portal/public) user, or doesn't resolve to an
       active user. We never widen privilege: an unparseable/unknown uid is a
       refusal, not a silent fallback to the connection identity.
+    - The literal ``support``, or the declared support uid as a number (the
+      embedded panel sends the Odoo session uid), resolves through
+      :func:`_resolve_partner_support_user` instead: the only way to act as an
+      archived user, and only the one the database declares.
     """
+    if uid == _PARTNER_SUPPORT_MARKER:
+        return _resolve_partner_support_user(env)
     empty = env["res.users"]
     try:
         uid_int = int(uid)
@@ -606,6 +646,9 @@ def _resolve_acting_member(env, uid):
     # SUPERUSER_ID would bypass every record rule — never impersonable.
     if uid_int == SUPERUSER_ID:
         return empty, "forbidden_acting_user"
+    if uid_int == _declared_partner_support_uid(env):
+        support_user, denied = _resolve_partner_support_user(env)
+        return (support_user, None) if not denied else (empty, "forbidden_acting_user")
     member = env["res.users"].sudo().search([("id", "=", uid_int), ("active", "=", True)], limit=1)
     if not member:
         return empty, "forbidden_acting_user"

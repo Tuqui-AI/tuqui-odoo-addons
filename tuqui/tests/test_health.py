@@ -37,7 +37,7 @@ class TestTuquiHealth(HttpCase):
         self.assertEqual(body["protocol_version"], "2.0")
         self.assertTrue(body["module_version"])
         self.assertTrue(body["odoo_version"])
-        for cap in ("rpc.execute_kw", "access_log"):
+        for cap in ("rpc.execute_kw", "access_log", "rpc.partner_support"):
             self.assertIn(cap, body["capabilities"])
         # F2: the database name must NOT be exposed on the public endpoint.
         self.assertNotIn("db_name", body)
