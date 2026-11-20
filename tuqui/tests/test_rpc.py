@@ -484,6 +484,71 @@ class TestTuquiRpcGateway(HttpCase):
         resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=self.portal_user.id, expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
 
+    # ─── Partner support uid (X-Tuqui-Acting-Uid: support) ───────────
+
+    def _archived_internal_user(self, login="tuqui_support_test"):
+        # A copy keeps the groups without naming the groups field, renamed in 19.0.
+        user = self.basic_user.copy({"name": login, "login": login})
+        self.assertFalse(user.share)
+        user.action_archive()
+        return user
+
+    def _set_support_uid(self, value):
+        self.env["ir.config_parameter"].sudo().set_param("tuqui.partner_support_uid", value)
+
+    def test_support_acts_as_the_declared_archived_user(self):
+        """``support`` runs as the uid the database declares, even archived."""
+        support_user = self._archived_internal_user()
+        self._set_support_uid(str(support_user.id))
+        resp = self._rpc(
+            "res.partner", "search_read", args=[[]], kwargs={"fields": ["name"], "limit": 1}, acting_uid="support"
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        log = self._latest_log(method="search_read", model_name="res.partner")
+        self.assertEqual(log.acting_user_id.id, support_user.id)
+
+    def test_support_without_param_is_refused(self):
+        """No declared uid → refusal, never the connection (superuser) path."""
+        self._set_support_uid(False)
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid="support", expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "partner_support_unavailable")
+        self.assertFalse(self._latest_log(method="search_read", model_name="res.partner").acting_user_id)
+
+    def test_support_param_superuser_is_refused(self):
+        self._set_support_uid("1")
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid="support", expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "partner_support_unavailable")
+
+    def test_support_param_portal_user_is_refused(self):
+        self._set_support_uid(str(self.portal_user.id))
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid="support", expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "partner_support_unavailable")
+
+    def test_declared_support_uid_by_number_acts_even_archived(self):
+        """The panel sends the Odoo session uid as a number: the declared one may be archived."""
+        support_user = self._archived_internal_user()
+        self._set_support_uid(str(support_user.id))
+        resp = self._rpc(
+            "res.partner", "search_read", args=[[]], kwargs={"fields": ["name"], "limit": 1}, acting_uid=support_user.id
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        log = self._latest_log(method="search_read", model_name="res.partner")
+        self.assertEqual(log.acting_user_id.id, support_user.id)
+
+    def test_archived_uid_other_than_support_stays_refused(self):
+        """Only the declared uid may be archived; any other archived uid is still refused."""
+        support_user = self._archived_internal_user()
+        self._set_support_uid(str(support_user.id))
+        other = self._archived_internal_user("tuqui_archived_other")
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=other.id, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
+
+    def test_archived_uid_without_support_param_stays_refused(self):
+        support_user = self._archived_internal_user()
+        self._set_support_uid(False)
+        resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=support_user.id, expect_status=403)
+        self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
+
     # ─── Per-member impersonation by uid ─────────────────────────────
 
     def test_acting_uid_impersonates_that_user(self):
@@ -952,17 +1017,25 @@ class TestTuquiRpcGateway(HttpCase):
 
     @mute_logger("odoo.sql_db")
     def test_query_over_client_budget_returns_query_timeout(self):
-        """client_timeout_ms=1 over a large table forces the cutoff → 400
-        query_timeout, worker freed. @mute_logger: without it, runbot counts
-        the expected psycopg2 ERROR log as a build failure."""
-        resp = self._rpc(
-            body_override={
-                "model": "ir.model.fields",
-                "method": "search_read",
-                "args": [[]],
-                "kwargs": {"fields": ["name", "model", "field_description", "help"]},
-                "client_timeout_ms": 1,
-            }
-        )
+        """client_timeout_ms=1 against a query that takes longer → 400
+        query_timeout, worker freed. The query sleeps on purpose: a fast runbot
+        read the whole table within 1 ms. @mute_logger: without it, runbot
+        counts the expected psycopg2 ERROR log as a build failure."""
+        dispatch = rpc_module._dispatch
+
+        def slow_dispatch(recordset, *args, **kwargs):
+            recordset.env.cr.execute("SELECT pg_sleep(0.2)")
+            return dispatch(recordset, *args, **kwargs)
+
+        with patch.object(rpc_module, "_dispatch", slow_dispatch):
+            resp = self._rpc(
+                body_override={
+                    "model": "ir.model.fields",
+                    "method": "search_read",
+                    "args": [[]],
+                    "kwargs": {"fields": ["name"]},
+                    "client_timeout_ms": 1,
+                }
+            )
         self.assertEqual(resp.status_code, 400, resp.text)
         self.assertEqual(resp.json()["error"]["code"], "query_timeout")

@@ -21,7 +21,8 @@ class TuquiHealth(models.AbstractModel):
         policy engine — new capabilities are added on the Tuqui side by calling
         new ORM methods, without shipping a new module version.
         """
-        capabilities = ["rpc.execute_kw", "access_log"]
+        # rpc.partner_support: X-Tuqui-Acting-Uid accepts "support" (see controllers/rpc.py).
+        capabilities = ["rpc.execute_kw", "access_log", "rpc.partner_support"]
         if self.env["tuqui.oauth.client"].sudo()._is_read_only():
             capabilities.append("policy.read_only")
         return capabilities
