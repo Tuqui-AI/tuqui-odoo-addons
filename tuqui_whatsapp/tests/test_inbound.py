@@ -1,6 +1,7 @@
 """What reaches Tuqui when a WhatsApp chat moves.
 
-* a customer's message on a bound number queues one event, with its text;
+* a customer's message on a bound number queues one event, with its text and
+  the customer's phone;
 * a number nobody bound sends nothing;
 * failing to queue never costs the customer's message;
 * a person of the business answering queues a "human reply", and what Tuqui
@@ -33,6 +34,7 @@ class TestTuquiWhatsappInbound(TuquiWhatsappCase):
         self.assertNotIn("mode", values)
         self.assertTrue(values["author"]["is_customer"])
         self.assertEqual(values["author"]["partner_id"], self.whatsapp_customer.id)
+        self.assertEqual(values["customer"]["phone"], "911234567891")
 
     def test_extra_keys_never_override_the_signed_ones(self):
         self._receive(self.channel, "hola")
@@ -62,6 +64,7 @@ class TestTuquiWhatsappInbound(TuquiWhatsappCase):
         event = self._events()
         self.assertEqual(len(event), 1)
         self.assertEqual(event._payload()["whatsapp"]["text"], "por el webhook")
+        self.assertEqual(event._payload()["whatsapp"]["customer"]["phone"], "911234567892")
 
     def test_a_person_answering_queues_a_human_reply(self):
         self._receive(self.channel, "hola")
@@ -78,6 +81,7 @@ class TestTuquiWhatsappInbound(TuquiWhatsappCase):
         self.assertFalse(human["author"]["is_customer"])
         # The chat is still the customer's, whoever wrote.
         self.assertEqual(human["customer"]["partner_id"], self.whatsapp_customer.id)
+        self.assertEqual(human["customer"]["phone"], "911234567891")
 
     def test_what_tuqui_writes_is_not_a_human_reply(self):
         self._receive(self.channel, "hola")

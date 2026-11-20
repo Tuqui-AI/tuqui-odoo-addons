@@ -67,6 +67,7 @@ class DiscussChannel(models.Model):
             "customer": {
                 "partner_id": self.whatsapp_partner_id.id or None,
                 "name": self.whatsapp_partner_id.name or "",
+                "phone": self.whatsapp_number or None,
             },
             "attachments": [
                 {"id": att.id, "name": att.name, "mimetype": att.mimetype, "voice": bool(att.voice_ids)}
