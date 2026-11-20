@@ -386,8 +386,10 @@ describe("the panel answers apply-result", () => {
         await spaSends({ type: "ready" });
         await animationFrame();
         const capabilities = {
+            odoo_screen: 1,
             apply_result: ["form_changes", "form_html", "chatter", "show_me", "point", "wait_step"],
             navigate: ["record", "new", "browse", "action"],
+            switch_company: true,
             menu_button: true,
         };
         const auth = posted.find((p) => p.message.type === "auth");
