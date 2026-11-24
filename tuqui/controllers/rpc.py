@@ -626,10 +626,10 @@ def _resolve_acting_member(env, uid):
 
     Returns ``(member, denied_reason)``:
 
-    - ``(<active internal user>, None)`` when the uid vets clean.
+    - ``(<active eligible user>, None)`` when the uid vets clean.
     - ``(env['res.users'], 'forbidden_acting_user')`` when the uid is the
-      superuser, a share (portal/public) user, or doesn't resolve to an
-      active user. We never widen privilege: an unparseable/unknown uid is a
+      superuser, a user that is not ``tuqui_eligible`` (portal/public unless a
+      module widens it), or doesn't resolve to an active user. We never widen privilege: an unparseable/unknown uid is a
       refusal, not a silent fallback to the connection identity.
     - The literal ``support``, or the declared support uid as a number (the
       embedded panel sends the Odoo session uid), resolves through
@@ -649,12 +649,13 @@ def _resolve_acting_member(env, uid):
     if uid_int == _declared_partner_support_uid(env):
         support_user, denied = _resolve_partner_support_user(env)
         return (support_user, None) if not denied else (empty, "forbidden_acting_user")
-    member = env["res.users"].sudo().search([("id", "=", uid_int), ("active", "=", True)], limit=1)
+    # Internal users only, unless a module widens `tuqui_eligible`.
+    member = (
+        env["res.users"]
+        .sudo()
+        .search([("id", "=", uid_int), ("active", "=", True), ("tuqui_eligible", "=", True)], limit=1)
+    )
     if not member:
-        return empty, "forbidden_acting_user"
-    # share == True is a portal/public user — not an internal member; refuse
-    # so the per-member path only ever runs as a real workspace member.
-    if member.share:
         return empty, "forbidden_acting_user"
     return member, None
 
@@ -779,8 +780,8 @@ class TuquiRpc(http.Controller):
     * MEMBER PATH — request carries ``X-Tuqui-Acting-Uid`` (a workspace
       member's res.users id). The call runs through ``with_user(member)`` so
       Odoo's ACL is the per-call privilege check — identical to the native
-      per-user path. The uid is vetted first: superuser, share/portal users
-      and unknown/inactive ids are refused (``forbidden_acting_user``).
+      per-user path. The uid is vetted first: superuser, users that are not
+      ``tuqui_eligible`` and unknown/inactive ids are refused (``forbidden_acting_user``).
       Writes here stay governed by the connection's ``read_only`` flag.
 
     * CONNECTION PATH — request has NO acting uid (workspace-level / system

@@ -22,7 +22,7 @@ class TuquiHealth(models.AbstractModel):
         new ORM methods, without shipping a new module version.
         """
         # rpc.partner_support: X-Tuqui-Acting-Uid accepts "support" (see controllers/rpc.py).
-        capabilities = ["rpc.execute_kw", "access_log", "rpc.partner_support"]
+        capabilities = ["rpc.execute_kw", "access_log", "rpc.partner_support", "users.tuqui_eligible"]
         if self.env["tuqui.oauth.client"].sudo()._is_read_only():
             capabilities.append("policy.read_only")
         return capabilities
