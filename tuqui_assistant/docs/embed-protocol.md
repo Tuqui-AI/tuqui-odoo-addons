@@ -59,8 +59,10 @@ Host (Odoo) → SPA (iframe):
 { "source": "tuqui-odoo", "type": "auth", "payload": {
     "client_id": "…", "nonce": "…",
     "capabilities": {
+      "odoo_screen": 1,                                               // ver «Qué anuncia el host»
       "apply_result": ["form_changes", "form_html", "chatter", "show_me", "point", "wait_step"],
-      "navigate": ["record", "new", "browse", "action"] } } }           // SSO: antes del contexto
+      "navigate": ["record", "new", "browse", "action"],
+      "switch_company": true } } }                                    // SSO: antes del contexto
 { "source": "tuqui-odoo", "type": "context", "payload": {
     "capabilities": { … },                                            // igual que en auth
     "kind": "record",                                                 // o "selection", "view", "none" (ver «Contexto de una vista»)
@@ -227,15 +229,46 @@ Si el `apply` o el `chatter` trae `proposalId`, el host contesta cuando termina:
 - **Idempotencia:** un `proposalId` que ya se procesó no se vuelve a aplicar; se
   repite su resultado. Al reconectar, el SPA vuelve a mandar los frames del turno,
   y un doble envío duplicaría líneas. El host recuerda los últimos 50.
-- **Lo que no conoce:** un `kind` que no está en `capabilities.apply_result`, o un
-  `type` de mensaje desconocido con `proposalId`, se contesta `rejected` con
-  motivo `unsupported`, sin tocar nada.
-- **`capabilities.apply_result`** (en `auth` y en cada `context`): los `kind` que
-  el host sabe contestar. El SPA no espera resultado de un `kind` que no esté ahí.
-  Va en cada `context` porque `auth` sale una sola vez por apertura del panel y el
-  SPA se puede recargar adentro.
+- **Lo que no conoce:** un `kind` que el host no sabe aplicar, o un `type` de
+  mensaje desconocido con `proposalId`, se contesta `rejected` con motivo
+  `unsupported`, sin tocar nada.
+- Qué propuestas espera Tuqui lo dice el anuncio: ver «Qué anuncia el host».
 - `targetOrigin` y los chequeos de origen son los mismos que para el resto de los
   mensajes.
+
+## Qué anuncia el host (`capabilities`)
+
+Va en `auth` y en cada `context`: `auth` sale una sola vez por apertura del panel y
+el SPA se puede recargar adentro.
+
+- **`odoo_screen`**: la versión de lo que el host hace en la pantalla. Con `1`, Tuqui
+  ofrece formulario, html, chatter, guardar, selección, la gota, «mostrame cómo» y
+  la espera de un paso. Las de formulario, solo con una página abierta
+  (`kind` distinto de `none`). Una tool de pantalla que pide código nuevo acá sube
+  el número (`ODOO_SCREEN_VERSION` en el servicio), y Tuqui guarda qué tools van
+  con cada versión. Lo anuncian los dos hosts: el embed y el panel de Tuqui.
+- **`navigate`**: los modos de `navigate` que abre. Solo el embed.
+- **`switch_company`**: `true` si cambia de compañía. Solo el embed. Cómo cambia lo
+  dice `company.switchMode`.
+- **`apply_result`**: la lista de `kind` que leía un Tuqui anterior a
+  `odoo_screen`. Se saca cuando ese Tuqui ya no está en uso.
+
+## El mismo Odoo en el panel de Tuqui (`side_panel_host.js`)
+
+En el chat de Tuqui, el panel lateral puede mostrar el Odoo del workspace. Ahí los
+roles se invierten: el chat enmarca a Odoo. Odoo manda `hello` una vez al arrancar,
+por si el `ready` del SPA llegó antes de que lo escuchara; el SPA contesta `ready` (que
+fija el origen), y desde ahí Odoo manda su `context` como el embed.
+
+Lo que el chat pide sobre la pantalla se atiende con el mismo código que en el embed
+(`host_bridge.js`): `apply`, `chatter`, `save`, `reload`, `point`, `show-me`,
+`wait-step` y `wait-cancel`, con sus `apply-result` y `step-event`. No navega ni
+cambia de compañía: no anuncia `navigate` ni `switch_company`.
+
+Odoo enfoca algunos campos por código al dibujar una pantalla (el buscador de la
+home, por ejemplo). En el panel, ese foco le saca el cursor al chat de al lado. Por
+eso, mientras el frame no tiene el foco, se ignora el `focus()` hecho por código,
+salvo el de «mostrame cómo», que escribe en un buscador.
 
 ## Reload de la vista (`reload`)
 
@@ -304,6 +337,9 @@ pedido. Por eso todo contexto (también `kind:"none"`) lleva las compañías en 
   "switchMode": "live"                                          // 19: cambia sin recargar
 }
 ```
+
+`switchMode` dice cómo cambia; que el host cambie de compañía lo dice
+`capabilities.switch_company`, que solo anuncia el embed.
 
 `switch-company` llega recién después de que la tool `odoo_switch_company`
 validó la compañía. El host la deja actual, conserva las otras tildadas, usa
@@ -450,8 +486,10 @@ primer mensaje.
 ## Archivos
 
 - **Odoo** (`Tuqui-AI/odoo-addons`, ramas `18.0` y `19.0`):
-  `static/src/panel/panel.js` (iframe + listener + SSO/auth post +
-  `apply-result`), `services/tuqui_assistant_service.js` (`getEmbedBootstrap`,
+  `static/src/panel/panel.js` (iframe + listener + SSO/auth post),
+  `static/src/embed/host_bridge.js` (propuestas y `apply-result`, común al embed y
+  al panel de Tuqui), `static/src/embed/side_panel_host.js` (el Odoo del panel de
+  Tuqui), `services/tuqui_assistant_service.js` (`getEmbedBootstrap`,
   `getSsoAuth`, `getContextPayload`, `applyProposal`→`record._update`,
   `proposeChatter`, `settleProposal`),
   `panel.xml` (iframe vs prompt de conexión),

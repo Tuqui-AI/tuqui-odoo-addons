@@ -9,10 +9,11 @@ import { MEDIAS_BREAKPOINTS, SIZES, utils as uiUtils } from "@web/core/ui/ui_uti
 import { _t } from "@web/core/l10n/translation";
 import { user } from "@web/core/user";
 import { switchCompany } from "@tuqui_assistant/services/tuqui_assistant_service";
-import { APPLY_RESULT_KINDS, NAVIGATE_MODES } from "@tuqui_assistant/services/tuqui_assistant_service";
+import { APPLY_RESULT_KINDS, NAVIGATE_MODES, ODOO_SCREEN_VERSION } from "@tuqui_assistant/services/tuqui_assistant_service";
+import { makeHostBridge } from "@tuqui_assistant/embed/host_bridge";
 import { isGotaMutation } from "@tuqui_assistant/screen/gota";
 import { useLayoutEffect } from "@web/owl2/utils";
-import { makeWalkSession, readProposalId } from "@tuqui_assistant/show_me/walk_session";
+import { makeWalkSession } from "@tuqui_assistant/show_me/walk_session";
 import { makeWaitSession } from "@tuqui_assistant/show_me/wait_step";
 
 // Odoo reflows to the docked panel before the walk reads the screen.
@@ -21,17 +22,18 @@ const DOCK_MS = 400;
 // What the host announces to the SPA, in `auth` and in every `context`.
 function hostCapabilities() {
     // `menu_button`: the header carries the SPA's conversations menu (the logo),
-    // so the SPA does not draw its own button.
-    return { apply_result: [...APPLY_RESULT_KINDS], navigate: [...NAVIGATE_MODES], menu_button: true };
+    // so the SPA does not draw its own button. `apply_result` keeps a Tuqui that
+    // predates `odoo_screen` working until it is deployed. Navigating and switching
+    // companies are this host's only: the side panel announces neither.
+    return {
+        odoo_screen: ODOO_SCREEN_VERSION,
+        apply_result: [...APPLY_RESULT_KINDS],
+        navigate: [...NAVIGATE_MODES],
+        switch_company: true,
+        menu_button: true,
+    };
 }
 
-// Kind of an `apply`: the SPA's own, or `form_html` for an html co-edit.
-function proposalKind(payload) {
-    if (payload?.kind) {
-        return payload.kind;
-    }
-    return payload?.htmlBase || payload?.selection ? "form_html" : "form_changes";
-}
 
 const MENU_HINT_KEY = "tuqui_menu_hint_shown";
 const MENU_HINT_TIMES = 2;
@@ -171,6 +173,13 @@ export class TuquiPanel extends Component {
             notify: (payload) => this._postToSpa({ type: "step-event", payload }),
         });
         this.tuquiAssistant = useService("tuquiAssistant");
+        this._bridge = makeHostBridge({
+            assistant: this.tuquiAssistant,
+            post: (message) => this._postToSpa(message),
+            walks: this._walks,
+            waits: this._waits,
+            showMe: (goal, proposalId, menu) => this._showMe(goal, proposalId, menu),
+        });
         this.notification = usePlugin(NotificationPlugin);
         this.action = useService("action");
         this.state = this.tuquiAssistant.state; // { panelOpen, context }, already a proxy
@@ -883,29 +892,6 @@ export class TuquiPanel extends Component {
     }
 
     /**
-     * Runs a proposal and answers `apply-result` to the SPA.
-     *
-     * Without `proposalId` (old SPA) it runs as before and answers nothing. A
-     * `proposalId` already seen is not run again: its stored result is repeated.
-     * A kind this host does not know is rejected as `unsupported`, untouched.
-     */
-    async _answerProposal(data, kind, run) {
-        const proposalId = readProposalId(data);
-        if (!proposalId) {
-            await run?.();
-            return;
-        }
-        // `apply` carries form kinds, `chatter` carries the chatter one.
-        const known =
-            run && APPLY_RESULT_KINDS.includes(kind) && (kind === "chatter") === (data.type === "chatter");
-        const result = await this.tuquiAssistant.settleProposal(
-            proposalId,
-            known ? run : () => this._unsupported(kind)
-        );
-        this._postApplyResult(proposalId, result);
-    }
-
-    /**
      * Walks this screen to `goal` (`odoo_show_me`), through `menu` first when Tuqui
      * sent its way, and answers how it ended.
      * Each step asks the SPA, which asks Tuqui's backend: the judgment key is
@@ -948,36 +934,6 @@ export class TuquiPanel extends Component {
         win.postMessage({ source: "tuqui-odoo", ...message }, this._spaOrigin);
     }
 
-    _unsupported(kind) {
-        return {
-            status: "rejected",
-            applied: [],
-            skipped: [],
-            reason: "unsupported",
-            message: _t(
-                "This Odoo does not know how to apply this proposal (%s). Update the Tuqui Assistant module.",
-                kind || "?"
-            ),
-        };
-    }
-
-    _postApplyResult(proposalId, result) {
-        const win = this.iframeRef()?.contentWindow;
-        const spaOrigin = this._spaOrigin;
-        if (!win || !spaOrigin) {
-            return;
-        }
-        try {
-            win.postMessage(
-                { source: "tuqui-odoo", type: "apply-result", payload: { proposalId, ...result } },
-                spaOrigin
-            );
-        } catch (e) {
-            console.warn("[tuqui_assistant] Could not post apply-result to iframe:", e);
-        }
-    }
-
-
     _handleMessage(ev) {
         const data = ev.data;
         if (!data || data.source !== "tuqui-spa") {
@@ -999,6 +955,9 @@ export class TuquiPanel extends Component {
         //    is null (invalid / unresolved baseUrl), discard.
         const spaOrigin = this._spaOrigin;
         if (!spaOrigin || ev.origin !== spaOrigin) {
+            return;
+        }
+        if (this._bridge.handle(data)) {
             return;
         }
         switch (data.type) {
@@ -1029,70 +988,6 @@ export class TuquiPanel extends Component {
                 this._postContext();
                 this._maybeShowMenuHint();
                 this._postLayout();
-                break;
-            case "apply":
-                // `baseRevision` (opcional): la revisión del contexto sobre la que
-                // el SPA razonó. Con eso el servicio detecta si el usuario tocó
-                // alguno de esos campos después y no lo pisa en silencio.
-                // `target` (opcional): el registro para el que se calculó; si no es
-                // el abierto, se rechaza sin tocar nada.
-                // `htmlBase` / `selection` (optional): html field co-edit, see
-                // docs/embed-protocol.md; its result goes with kind `form_html`.
-                this._answerProposal(data, proposalKind(data.payload), () =>
-                    this.tuquiAssistant.applyProposal(data.payload?.changes || {}, {
-                        baseRevision: data.payload?.baseRevision,
-                        target: data.payload?.target,
-                        ...(data.payload?.htmlBase && { htmlBase: data.payload.htmlBase }),
-                        ...(data.payload?.selection && { selection: data.payload.selection }),
-                    })
-                );
-                break;
-            case "chatter":
-                // Chatter content proposal: opens the standard Odoo composer
-                // pre-filled (user reviews and sends). NEVER posted silently —
-                // human dispatch is structural.
-                this._answerProposal(data, data.payload?.kind || "chatter", () =>
-                    this.tuquiAssistant.proposeChatter(data.payload || {})
-                );
-                break;
-            case "show-me":
-                this._answerProposal(data, "show_me", () => this._showMe(data.payload?.goal, readProposalId(data), data.payload?.menu));
-                break;
-            case "show-me-step-result":
-                this._walks.onStepResult(data);
-                break;
-            case "wait-step":
-                // Wait in silence for the person to do a step: no apply-result, the
-                // turn already ended; what happens comes back as a `step-event`.
-                if (readProposalId(data)) {
-                    this._waits.start(readProposalId(data), data.payload?.waiting_line || "");
-                }
-                break;
-            case "wait-cancel":
-                this._waits.cancel(readProposalId(data));
-                break;
-            case "point":
-                if (readProposalId(data)) {
-                    // By name, on the screen as it is now: the chat waits for what was found.
-                    this._answerProposal(data, "point", () => this.tuquiAssistant.pointWhenThere(data.payload || {}));
-                } else {
-                    // Mark a control the assistant chose from the screen's list of targets.
-                    this.tuquiAssistant.point(data.payload || {});
-                }
-                break;
-            case "save":
-                // El usuario pidió guardar. Odoo valida; si rechaza, el servicio
-                // lo dice en vez de cantar victoria.
-                this.tuquiAssistant.saveRecord();
-                break;
-            case "reload":
-                // El turno escribió en Odoo por atrás: los datos de la vista
-                // quedaron viejos. Relee sin recargar la página. El servicio se
-                // niega si el form está sucio — no le pisamos al usuario lo que
-                // está escribiendo por refrescar un dato — y con el diálogo de un
-                // x2many abierto recarga el form cuando se cierra. Nadie espera
-                // el resultado: en una vista sólo dice que la búsqueda arrancó.
-                this.tuquiAssistant.reloadView();
                 break;
             case "navigate":
                 // Odoo navigation from chat, through doAction (which checks access):
@@ -1149,9 +1044,7 @@ export class TuquiPanel extends Component {
                 break;
             default:
                 // A proposal type this host does not know: say so, never guess.
-                if (readProposalId(data)) {
-                    this._answerProposal(data, data.payload?.kind || data.type, null);
-                }
+                this._bridge.refuse(data);
                 break;
         }
     }

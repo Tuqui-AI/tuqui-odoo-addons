@@ -1,5 +1,6 @@
 import { describe, expect, test } from "@odoo/hoot";
-import { makeSidePanelHost } from "@tuqui_assistant/embed/side_panel_host";
+import { EventBus } from "@odoo/owl";
+import { guardFocus, makeSidePanelHost } from "@tuqui_assistant/embed/side_panel_host";
 
 /**
  * This Odoo inside Tuqui's side panel: it sends its screen to the chat beside it
@@ -10,24 +11,36 @@ import { makeSidePanelHost } from "@tuqui_assistant/embed/side_panel_host";
 
 const TUQUI = "https://acme.tuqui.example";
 
-function setup({ walk, dirty = false } = {}) {
+function setup({ walk, dirty = false, company } = {}) {
     const sent = [];
     const pointed = [];
+    const calls = [];
     const win = { parent: { postMessage: (data, origin) => sent.push({ data, origin }) } };
     let targets = [{ id: "t1", name: "Lotes", role: "checkbox" }];
     const assistant = {
         readScreen: () => ({ targets, elements: new Map() }),
-        getContextPayload: (screen) => ({ kind: "record", model: "res.config.settings", targets: screen.targets }),
+        getContextPayload: (screen) => ({
+            kind: "record",
+            model: "res.config.settings",
+            targets: screen.targets,
+            ...(company && { company }),
+        }),
         rememberScreen: () => {},
         point: (payload) => pointed.push(payload),
         pointWhenThere: async (payload) => ({ status: "marked", places: [payload.section || ""], applied: [], skipped: [], message: "" }),
         state: { context: { kind: "record", dirty } },
         settleProposal: (proposalId, run) => run(),
+        applyProposal: async (changes, options) => (calls.push(["apply", changes, options]), { status: "applied", applied: Object.keys(changes), skipped: [], message: "" }),
+        proposeChatter: async (payload) => (calls.push(["chatter", payload]), { status: "opened", applied: [], skipped: [], message: "" }),
+        saveRecord: () => calls.push(["save"]),
+        reloadView: () => calls.push(["reload"]),
     };
-    const host = makeSidePanelHost(assistant, win, walk);
+    const host = makeSidePanelHost(assistant, win, walk, { bus: new EventBus(), where: () => "here", idleMs: 5 });
     const from = (data, origin = TUQUI, source = win.parent) => host.onMessage({ source, origin, data: { source: "tuqui-spa", ...data } });
-    return { host, sent, pointed, from, setTargets: (t) => (targets = t), win };
+    return { host, sent, pointed, calls, from, setTargets: (t) => (targets = t), win };
 }
+
+const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("the screen, to the chat beside it", () => {
     test("nothing is sent before the chat says it is ready", () => {
@@ -36,14 +49,24 @@ describe("the screen, to the chat beside it", () => {
         expect(sent).toEqual([]);
     });
 
-    test("on ready it sends the screen to that origin, announcing the walk and the drop by name", () => {
+    test("on ready it sends the screen to that origin, announcing the screen tools", () => {
         const { sent, from } = setup();
         from({ type: "ready" });
         expect(sent).toHaveLength(1);
         expect(sent[0].origin).toBe(TUQUI);
         expect(sent[0].data.type).toBe("context");
-        expect(sent[0].data.payload.capabilities).toEqual({ apply_result: ["show_me", "point"] });
+        // `apply_result` is for a Tuqui that predates `odoo_screen`, and lists what it offered here.
+        expect(sent[0].data.payload.capabilities).toEqual({ odoo_screen: 1, apply_result: ["show_me", "point"] });
         expect(sent[0].data.payload.targets[0].name).toBe("Lotes");
+    });
+
+    test("the companies go as they are, and switching them is not announced: that is the embed's", () => {
+        const company = { current: { id: 1, name: "Acme" }, active: [], available: [{ id: 2, name: "Beta" }], switchMode: "reload" };
+        const { sent, from } = setup({ company });
+        from({ type: "ready" });
+        expect(sent[0].data.payload.company).toEqual(company);
+        expect(sent[0].data.payload.capabilities.switch_company).toBe(undefined);
+        expect(sent[0].data.payload.capabilities.navigate).toBe(undefined);
     });
 
     test("a screen that did not change is not sent again; one that did, is", () => {
@@ -93,8 +116,79 @@ describe("the drop, from the chat beside it", () => {
     });
 });
 
+describe("the open form, from the chat beside it", () => {
+    test("a proposal for the form is applied and answered as the embed does", async () => {
+        const { calls, sent, from } = setup();
+        from({ type: "ready" });
+        from({ type: "apply", payload: { changes: { name: "Nuevo" }, baseRevision: 3, proposalId: "p5" } });
+        await tick();
+        expect(calls).toEqual([["apply", { name: "Nuevo" }, { baseRevision: 3, target: undefined }]]);
+        const result = sent.find((m) => m.data.type === "apply-result");
+        expect(result.origin).toBe(TUQUI);
+        expect(result.data.payload).toEqual({ proposalId: "p5", status: "applied", applied: ["name"], skipped: [], message: "" });
+    });
+
+    test("a chatter proposal opens the composer and is answered", async () => {
+        const { calls, sent, from } = setup();
+        from({ type: "ready" });
+        from({ type: "chatter", payload: { mode: "note", body: "<p>x</p>", proposalId: "p6" } });
+        await tick();
+        expect(calls[0][0]).toBe("chatter");
+        expect(sent.find((m) => m.data.type === "apply-result").data.payload.status).toBe("opened");
+    });
+
+    test("save and reload reach the form", () => {
+        const { calls, from } = setup();
+        from({ type: "ready" });
+        from({ type: "save" });
+        from({ type: "reload" });
+        expect(calls).toEqual([["save"], ["reload"]]);
+    });
+
+    test("a proposal this host does not know is rejected untouched", async () => {
+        const { calls, sent, from } = setup();
+        from({ type: "ready" });
+        from({ type: "teleport", payload: { proposalId: "p7" } });
+        await tick();
+        expect(calls).toEqual([]);
+        const result = sent.find((m) => m.data.type === "apply-result").data.payload;
+        expect(result.status).toBe("rejected");
+        expect(result.reason).toBe("unsupported");
+    });
+
+    test("nothing from the form is done for another origin", async () => {
+        const { calls, sent, from } = setup();
+        from({ type: "ready" });
+        from({ type: "apply", payload: { changes: { name: "x" }, proposalId: "p8" } }, "https://attacker.example");
+        from({ type: "save" }, "https://attacker.example");
+        await tick();
+        expect(calls).toEqual([]);
+        expect(sent.filter((m) => m.data.type === "apply-result")).toEqual([]);
+    });
+});
+
+describe("the wait for a step, from the chat beside it", () => {
+    test("a wait the person never acts on ends idle, told to the chat", async () => {
+        const { sent, from } = setup();
+        from({ type: "ready" });
+        from({ type: "wait-step", payload: { proposalId: "w1", kind: "wait_step", waiting_line: "Abrí Ventas" } });
+        await tick(20);
+        const event = sent.find((m) => m.data.type === "step-event");
+        expect(event.origin).toBe(TUQUI);
+        expect(event.data.payload).toEqual({ proposal_id: "w1", outcome: "idle", happened: [] });
+    });
+
+    test("a cancelled wait tells nothing", async () => {
+        const { sent, from } = setup();
+        from({ type: "ready" });
+        from({ type: "wait-step", payload: { proposalId: "w2", kind: "wait_step", waiting_line: "Abrí Ventas" } });
+        from({ type: "wait-cancel", payload: { proposalId: "w2" } });
+        await tick(20);
+        expect(sent.filter((m) => m.data.type === "step-event")).toEqual([]);
+    });
+});
+
 describe("the walk, asked by the chat beside it", () => {
-    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
     test("each step goes to the chat, and how it ended comes back as apply-result", async () => {
         const walk = async (goal, ask) => {
@@ -138,5 +232,45 @@ describe("the walk, asked by the chat beside it", () => {
         from({ type: "show-me", payload: { goal: "g", proposalId: "p3" } }, "https://attacker.example");
         await tick();
         expect(walked).toBe(false);
+    });
+});
+
+describe("the focus, while the person writes in the chat beside it", () => {
+    function frame({ focused = false } = {}) {
+        const focusedOn = [];
+        class HTMLElement {
+            constructor(name) {
+                this.name = name;
+            }
+            focus() {
+                focusedOn.push(this.name);
+            }
+        }
+        const win = { HTMLElement, document: { hasFocus: () => focused } };
+        return { win, focusedOn, HTMLElement, setFocused: (value) => (focused = value) };
+    }
+
+    test("a focus by code is ignored while the frame does not have the focus", () => {
+        const { win, focusedOn, HTMLElement } = frame();
+        guardFocus(win, () => false);
+        new HTMLElement("search").focus();
+        expect(focusedOn).toEqual([]);
+    });
+
+    test("with the focus in the frame, focusing works as always", () => {
+        const { win, focusedOn, HTMLElement } = frame({ focused: true });
+        guardFocus(win, () => false);
+        new HTMLElement("search").focus();
+        expect(focusedOn).toEqual(["search"]);
+    });
+
+    test("the walk may focus the box it types in, from the chat", () => {
+        const { win, focusedOn, HTMLElement } = frame();
+        let walking = true;
+        guardFocus(win, () => walking);
+        new HTMLElement("menu search").focus();
+        walking = false;
+        new HTMLElement("search").focus();
+        expect(focusedOn).toEqual(["menu search"]);
     });
 });
