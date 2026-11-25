@@ -108,17 +108,19 @@ SPA (iframe) → Host (Odoo):
   "payload": { "companyId": 2 } }                                   // hacer actual otra compañía (recarga la página)
 { "source": "tuqui-spa", "type": "point",
   "payload": { "target": "t27", "name": "Números de serie", "role": "checkbox" } } // marcar un control de `targets`
-{ "source": "tuqui-spa", "type": "unread", "payload": { "count": 2 } } // filas de Avisos sin leer: punto en el ícono del systray
+{ "source": "tuqui-spa", "type": "unread", "payload": { "count": 2 } } // filas de Avisos sin leer: contador en el ícono del systray
 ```
 
-`unread` llega cada vez que cambia la cantidad, mientras el chat está montado. El punto
-es solo información: el ícono sigue abriendo y cerrando el panel, y Avisos se ve adentro
-del chat. El punto dura lo que dura esta carga de la página: si el panel no se abrió desde
-que cargó, el módulo no sabe si hay avisos, y el punto aparece recién cuando se abre. Un F5
+`unread` llega cada vez que cambia la cantidad, mientras el chat está montado. El systray
+muestra la cantidad con el mismo badge que Discuss y Actividades; adentro del panel, el logo
+que abre el lateral (donde vive la campana) y la burbuja minimizada llevan un punto. Es solo
+información: el ícono sigue abriendo y cerrando el panel, y Avisos se ve adentro
+del chat. El contador dura lo que dura esta carga de la página: si el panel no se abrió desde
+que cargó, el módulo no sabe si hay avisos, y el contador aparece recién cuando se abre. Un F5
 o un cambio de compañía (que recarga la página) lo borran hasta volver a abrir el panel,
 aunque el panel estuviera minimizado. Cerrar el panel también lo borra: sin chat, el módulo
 ya no sabe. Si se pierde la conexión con el panel minimizado, el chat queda montado debajo
-del aviso y el punto sigue con lo último que mandó.
+del aviso y el contador sigue con lo último que mandó.
 
 ## Contexto vivo y conflicto (`revision` / `baseRevision`)
 

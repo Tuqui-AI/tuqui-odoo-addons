@@ -27,6 +27,9 @@
                             <rect x="3" y="3" width="18" height="18" rx="2"/>
                             <path d="M9 3v18"/>
                         </svg>
+                        <!-- The logo opens the sidebar, where the bell is: with the
+                             sidebar closed, this dot is what says so. -->
+                        <span t-if="this.state.unreadNotices" class="o-tuqui-notice-dot" aria-hidden="true"/>
                     </button>
                     <button class="btn btn-sm o-tuqui-title" t-on-click="openInTuqui"
                             t-att-title="openInTuquiLabel" t-att-aria-label="openInTuquiLabel">Tuqui</button>

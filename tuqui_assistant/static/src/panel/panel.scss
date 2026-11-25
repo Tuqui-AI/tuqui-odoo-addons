@@ -59,7 +59,6 @@ $o-tuqui-height: Min(95vh, 633px, calc(100vh - 62px));
 // opacidad mientras la tarjeta está a la vista. Sin esta regla la clase existía
 // y no pintaba nada.
 .o-tuqui-systray-btn {
-    position: relative;
     .o-tuqui-systray-icon {
         opacity: 0.75;
         transition: opacity 0.15s ease;
@@ -73,19 +72,6 @@ $o-tuqui-height: Min(95vh, 633px, calc(100vh - 62px));
         .o-tuqui-systray-icon {
             opacity: 1;
         }
-    }
-    // Unread notices in Tuqui. The ring in the navbar colour keeps it readable over the icon;
-    // Odoo 18 has the navbar colour only as a SCSS variable, no CSS one.
-    .o-tuqui-notice-dot {
-        position: absolute;
-        top: 0.35rem;
-        right: 0.3rem;
-        width: 0.5rem;
-        height: 0.5rem;
-        border-radius: 50%;
-        background: #fea912;
-        box-shadow: 0 0 0 2px $o-navbar-background;
-        pointer-events: none;
     }
 }
 
@@ -194,7 +180,7 @@ $o-tuqui-height: Min(95vh, 633px, calc(100vh - 62px));
         height: 118%;
         display: block;
     }
-    // The same dot as the navbar icon, on the bubble's top right, ringed in the page colour.
+    // Unread notices: a dot on the bubble's top right, ringed in the page colour.
     .o-tuqui-notice-dot {
         position: absolute;
         top: 0;
@@ -350,6 +336,7 @@ $o-tuqui-height: Min(95vh, 633px, calc(100vh - 62px));
     }
     // The 2px negative margin keeps the logo where it was, inside a 24px target.
     .o-tuqui-menu-toggle {
+        position: relative;
         display: grid;
         place-items: center;
         width: 24px;
@@ -384,6 +371,19 @@ $o-tuqui-height: Min(95vh, 633px, calc(100vh - 62px));
                 transform: none;
             }
         }
+    }
+    // Unread notices, on the logo that opens the sidebar with the bell. Outside
+    // the logo's corner, ringed in the header colour, so it does not read as part of it.
+    .o-tuqui-menu-toggle .o-tuqui-notice-dot {
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--tuqui-mostaza);
+        box-shadow: 0 0 0 2px var(--o-view-background-color, #fff);
+        pointer-events: none;
     }
     .o-tuqui-menu-hint {
         .o-tuqui-logo {

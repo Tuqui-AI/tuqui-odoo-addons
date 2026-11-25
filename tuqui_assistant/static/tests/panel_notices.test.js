@@ -8,7 +8,7 @@ import { TuquiSystray } from "@tuqui_assistant/systray/systray";
 
 /**
  * Tuqui's unread notices reach Odoo through the chat: `unread` sets the count
- * the systray dot reads. The list itself is inside the panel's chat.
+ * the systray counter shows. The list itself is inside the panel's chat.
  */
 
 describe("unread notices", () => {
@@ -39,20 +39,50 @@ describe("unread notices", () => {
         window.dispatchEvent(new MessageEvent("message", { data, origin: BASE, source: win }));
     }
 
-    test("the systray icon carries the dot only while something is unread", async () => {
-        expect(".o-tuqui-systray-btn .o-tuqui-notice-dot").toHaveCount(0);
+    test("the systray icon carries Odoo's counter only while something is unread", async () => {
+        expect(".o-tuqui-systray-btn .badge").toHaveCount(0);
 
         fromChat({ source: "tuqui-spa", type: "unread", payload: { count: 2 } });
         await animationFrame();
         expect(assistant.state.unreadNotices).toBe(2);
-        expect(".o-tuqui-systray-btn .o-tuqui-notice-dot").toHaveCount(1);
-        expect(".o-tuqui-systray-btn").toHaveAttribute("title", "Hide Tuqui · Unread notices in Tuqui");
-        expect(".o-tuqui-systray-btn").toHaveAttribute("aria-label", "Hide Tuqui · Unread notices in Tuqui");
+        // The same markup as Discuss and Activities, so the navbar draws it the same way.
+        expect(".o-tuqui-systray-btn .badge.rounded-pill").toHaveText("2");
+        expect(".o-tuqui-systray-btn .o-tuqui-notice-dot").toHaveCount(0);
+        expect(".o-tuqui-systray-btn").toHaveAttribute("title", "Hide Tuqui · 2 unread notices");
 
         fromChat({ source: "tuqui-spa", type: "unread", payload: { count: 0 } });
         await animationFrame();
-        expect(".o-tuqui-systray-btn .o-tuqui-notice-dot").toHaveCount(0);
+        expect(".o-tuqui-systray-btn .badge").toHaveCount(0);
         expect(".o-tuqui-systray-btn").toHaveAttribute("title", "Hide Tuqui");
+    });
+
+    // The aria-label replaces the button's content for a screen reader, so the
+    // count the badge draws has to be in it too.
+    for (const [count, label] of [
+        [1, "Hide Tuqui · 1 unread notice"],
+        [2, "Hide Tuqui · 2 unread notices"],
+        [12, "Hide Tuqui · 12 unread notices"],
+    ]) {
+        test(`a screen reader hears the count the badge shows (${count})`, async () => {
+            fromChat({ source: "tuqui-spa", type: "unread", payload: { count } });
+            await animationFrame();
+            expect(".o-tuqui-systray-btn").toHaveAttribute("aria-label", label);
+        });
+    }
+
+    test("the logo that opens the sidebar carries the dot while something is unread, and says so", async () => {
+        expect(".o-tuqui-menu-toggle .o-tuqui-notice-dot").toHaveCount(0);
+        expect(".o-tuqui-menu-toggle").toHaveAttribute("title", "Conversations");
+
+        fromChat({ source: "tuqui-spa", type: "unread", payload: { count: 3 } });
+        await animationFrame();
+        expect(".o-tuqui-menu-toggle .o-tuqui-notice-dot").toHaveCount(1);
+        expect(".o-tuqui-menu-toggle").toHaveAttribute("title", "Conversations · Unread notices in Tuqui");
+        expect(".o-tuqui-menu-toggle").toHaveAttribute("aria-label", "Conversations · Unread notices in Tuqui");
+
+        fromChat({ source: "tuqui-spa", type: "unread", payload: { count: 0 } });
+        await animationFrame();
+        expect(".o-tuqui-menu-toggle .o-tuqui-notice-dot").toHaveCount(0);
     });
 
     test("a count that is not a number is nothing unread", async () => {
@@ -88,6 +118,6 @@ describe("unread notices", () => {
         document.querySelector(".o-tuqui-close").click();
         await animationFrame();
         expect(assistant.state.unreadNotices).toBe(0);
-        expect(".o-tuqui-systray-btn .o-tuqui-notice-dot").toHaveCount(0);
+        expect(".o-tuqui-systray-btn .badge").toHaveCount(0);
     });
 });

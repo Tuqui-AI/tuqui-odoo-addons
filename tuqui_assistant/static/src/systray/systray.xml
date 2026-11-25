@@ -11,7 +11,8 @@
                 t-att-aria-label="buttonLabel">
             <img class="o-tuqui-systray-icon"
                  src="/tuqui_assistant/static/img/tuqui-smile.svg" alt="Tuqui"/>
-            <span t-if="state.unreadNotices" class="o-tuqui-notice-dot" aria-hidden="true"/>
+            <!-- Odoo's own counter, as on Discuss and Activities: the navbar styles it. -->
+            <span t-if="this.state.unreadNotices" class="badge rounded-pill" aria-hidden="true" t-out="this.state.unreadNotices"/>
         </button>
     </t>
 </templates>

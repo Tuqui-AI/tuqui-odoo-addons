@@ -141,7 +141,7 @@ export function sizeForWidth(width) {
  *              { source: "tuqui-spa",  type: "save" }     // guardar el form abierto (lo pidió el usuario)
  *              { source: "tuqui-spa",  type: "point",    payload: { target, name, role } }  // mark a control of the screen's list
  *              { source: "tuqui-spa",  type: "point",    payload: { name, section, proposalId } }  // find it on screen now, answered in apply-result
- *              { source: "tuqui-spa",  type: "unread",   payload: { count } }  // unread notices: the systray dot
+ *              { source: "tuqui-spa",  type: "unread",   payload: { count } }  // unread notices: the systray counter and the logo dot
  *              { source: "tuqui-spa",  type: "show-me",  payload: { goal, proposalId } }  // walk the screen to goal
  *              { source: "tuqui-spa",  type: "show-me-step-result", id, ok, result | error }
  *              { source: "tuqui-spa",  type: "wait-step", payload: { proposalId, kind: "wait_step", waiting_line, done_line } }  // wait in silence
@@ -1000,7 +1000,8 @@ export class TuquiPanel extends Component {
                 this.tuquiAssistant.navigate(data.payload || {});
                 break;
             case "unread":
-                // Unread notices count from the chat; the systray dot reads it.
+                // Unread notices count from the chat: the systray counter, and the dots
+                // on the panel's logo and minimized bubble, read it.
                 this.tuquiAssistant.setUnreadNotices(data.payload?.count);
                 break;
             case "location":
@@ -1048,7 +1049,8 @@ export class TuquiPanel extends Component {
     // Labels for icon-only header buttons (title + aria-label for screen readers).
     // Wrapped in _t() so they are translatable.
     get menuLabel() {
-        return _t("Conversations");
+        const label = _t("Conversations");
+        return this.state.unreadNotices ? `${label} · ${_t("Unread notices in Tuqui")}` : label;
     }
     get openInTuquiLabel() {
         return _t("Open in Tuqui");

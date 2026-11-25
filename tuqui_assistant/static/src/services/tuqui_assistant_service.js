@@ -1678,7 +1678,7 @@ export const tuquiAssistantService = {
             state.minimized = false;
             state.expanded = false;
             state.pendingAsk = null;
-            // The chat that reported it is gone: nobody would clear the dot.
+            // The chat that reported it is gone: nobody would clear the counter.
             state.unreadNotices = 0;
             _saveState();
         }
@@ -1704,7 +1704,7 @@ export const tuquiAssistantService = {
             state.expanded = true;
             _saveState();
         }
-        /** What the chat says is unread: the systray dot reads it. */
+        /** What the chat says is unread: the systray counter and the panel's dots read it. */
         function setUnreadNotices(count) {
             state.unreadNotices = Number.isInteger(count) && count > 0 ? count : 0;
         }

@@ -32,11 +32,17 @@ export class TuquiSystray extends Component {
         return _t("Hide Tuqui");
     }
 
+    /** The badge's count in words. Odoo's `_t` has no plural forms, so one string per form. */
     get noticesLabel() {
-        return _t("Unread notices in Tuqui");
+        const count = this.state.unreadNotices;
+        return count === 1 ? _t("1 unread notice") : _t("%s unread notices", count);
     }
 
-    /** Title and accessible name of the button: what the click does, plus the dot. */
+    /**
+     * Title and accessible name of the button: what the click does, plus the
+     * unread count. The aria-label replaces the button's content for a screen
+     * reader, so the badge's number has to be said here.
+     */
     get buttonLabel() {
         const action = this.showing ? this.hideLabel : this.showLabel;
         return this.state.unreadNotices ? `${action} · ${this.noticesLabel}` : action;
