@@ -30,7 +30,7 @@ class TestTuquiHealth(HttpCase):
         self.assertEqual(body["protocol_version"], "2.0")
         self.assertTrue(body["module_version"])
         self.assertTrue(body["odoo_version"])
-        for cap in ("rpc.execute_kw", "access_log", "rpc.partner_support"):
+        for cap in ("rpc.execute_kw", "access_log", "rpc.partner_support", "users.tuqui_eligible"):
             self.assertIn(cap, body["capabilities"])
         self.assertEqual(
             set(body), {"ok", "module", "module_version", "protocol_version", "odoo_version", "capabilities"}

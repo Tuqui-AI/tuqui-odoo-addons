@@ -546,6 +546,51 @@ class TestTuquiRpcGateway(HttpCase):
         resp = self._rpc("res.partner", "search_read", args=[[]], acting_uid=support_user.id, expect_status=403)
         self.assertEqual(resp.json()["error"]["code"], "forbidden_acting_user")
 
+    def test_tuqui_eligible_is_internal_users_by_default(self):
+        users = self.env["res.users"]
+        self.assertTrue(self.basic_user.tuqui_eligible)
+        self.assertFalse(self.portal_user.tuqui_eligible)
+        eligible = users.search([("tuqui_eligible", "=", True)])
+        self.assertIn(self.basic_user, eligible)
+        self.assertNotIn(self.portal_user, eligible)
+        not_eligible = users.search([("tuqui_eligible", "!=", True)])
+        self.assertIn(self.portal_user, not_eligible)
+        self.assertNotIn(self.basic_user, not_eligible)
+        # Newer versions hand search methods `in` / `not in`.
+        self.assertEqual(users.search([("tuqui_eligible", "in", [True])]), eligible)
+        self.assertEqual(users.search([("tuqui_eligible", "not in", [True])]), not_eligible)
+
+    def test_a_widened_tuqui_eligible_lets_a_portal_user_act_with_its_own_rights(self):
+        """A module that widens the domain opens the member path to that user, nothing more."""
+        portal = self.portal_user
+        users_class = type(self.env["res.users"])
+        with patch.object(
+            users_class,
+            "_tuqui_eligible_domain",
+            lambda self: ["|", ("share", "=", False), ("id", "=", portal.id)],
+        ):
+            portal.invalidate_recordset(["tuqui_eligible"])
+            self.assertTrue(portal.tuqui_eligible)
+            self.assertIn(portal, self.env["res.users"].search([("tuqui_eligible", "=", True)]))
+            resp = self._rpc(
+                "res.users",
+                "search_read",
+                args=[[("id", "=", portal.id)]],
+                kwargs={"fields": ["name"]},
+                acting_uid=portal.id,
+                expect_status=200,
+            )
+            self.assertEqual([r["id"] for r in resp.json()["data"]], [portal.id])
+            resp = self._rpc(
+                "ir.config_parameter",
+                "search_read",
+                args=[[]],
+                kwargs={"fields": ["key"]},
+                acting_uid=portal.id,
+                expect_status=403,
+            )
+            self.assertEqual(resp.json()["error"]["code"], "access_denied")
+
     # ─── Per-member impersonation by uid ─────────────────────────────
 
     def test_acting_uid_impersonates_that_user(self):
