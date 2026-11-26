@@ -43,7 +43,7 @@ class TuquiEmbedPass(models.Model):
         Tuqui hands over the link instead of a blank panel.
         """
         user = self.env.user
-        if self.env.su or user.share or not user.active:
+        if self.env.su or not user.tuqui_eligible or not user.active:
             raise AccessDenied()
         origins = embed_origins(self.env)
         if not origins or (origin and origin not in origins):
