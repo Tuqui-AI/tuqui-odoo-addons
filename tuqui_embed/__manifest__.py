@@ -8,7 +8,7 @@
         '"Tuqui panel" in your devices. Same user, same access rights. Requires the free '
         "Tuqui Companion module. For Odoo.sh and On-Premise."
     ),
-    "version": "19.0.1.4.0",
+    "version": "19.0.1.5.0",
     "category": "Productivity",
     "author": "Tuqui-AI",
     "website": "https://tuqui.com",
