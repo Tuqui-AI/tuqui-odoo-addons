@@ -268,6 +268,48 @@ describe("navigate", () => {
     });
 });
 
+describe("opening a menu's screen for a walk", () => {
+    test("says why to the walk and tells the person nothing; the chat's navigate still tells", async () => {
+        await mountForm();
+        patchWithCleanup(getService("menu"), { getMenu: () => undefined });
+        const notes = [];
+        patchWithCleanup(getService("notification"), { add: (message) => notes.push(String(message)) });
+        const result = await getService("tuquiAssistant").openMenuScreen(99);
+        expect(result.opened).toBe(false);
+        expect(result.reason).toInclude("not available");
+        expect(notes).toEqual([]);
+        expect(await getService("tuquiAssistant").navigate({ mode: "action", menuId: 99 })).toBe(false);
+        expect(notes.length).toBe(1);
+    });
+
+    test("opens the screen of a menu", async () => {
+        await mountForm();
+        patchWithCleanup(getService("menu"), { getMenu: () => ({ id: 7, actionID: 34 }), setCurrentMenu: () => {} });
+        const action = getService("action");
+        const opened = [];
+        patchWithCleanup(action, {
+            loadAction: async () => ({ id: 34, type: "ir.actions.act_window", res_model: "res.partner", views: [[false, "list"]] }),
+            doAction: async (request) => opened.push(request),
+        });
+        expect(await getService("tuquiAssistant").openMenuScreen(7)).toEqual({ opened: true });
+        expect(opened).toEqual([34]);
+    });
+
+    test("once the walk ended, the menu's screen is not opened", async () => {
+        await mountForm();
+        patchWithCleanup(getService("menu"), { getMenu: () => ({ id: 7, actionID: 34 }), setCurrentMenu: () => {} });
+        const controller = new AbortController();
+        const opened = [];
+        patchWithCleanup(getService("action"), {
+            loadAction: async () => (controller.abort(), { id: 34, type: "ir.actions.act_window", res_model: "res.partner", views: [[false, "list"]] }),
+            doAction: async (request) => opened.push(request),
+        });
+        const result = await getService("tuquiAssistant").openMenuScreen(7, { signal: controller.signal });
+        expect(result.opened).toBe(false);
+        expect(opened).toEqual([]);
+    });
+});
+
 describe("navigate never runs code", () => {
     test("an xmlid that names a server action is not run", async () => {
         await mountForm();

@@ -2,7 +2,7 @@ import { registry } from "@web/core/registry";
 import { delay } from "@web/core/utils/concurrency";
 import { createPilot } from "@tuqui_assistant/show_me/pilot_ui";
 import { walkMenu } from "@tuqui_assistant/show_me/menu_walk";
-import { isReachable, knowMenus, observe } from "@tuqui_assistant/show_me/screen_actions";
+import { isReachable, knowMenus, observe, watchEffect } from "@tuqui_assistant/show_me/screen_actions";
 
 /**
  * "Show me how": Tuqui walks the screen to a goal while the person
@@ -20,6 +20,10 @@ import { isReachable, knowMenus, observe } from "@tuqui_assistant/show_me/screen
  */
 
 const MAX_STEPS = 12;
+// Tuqui's backend takes this many history items per step; the walk keeps them all.
+const MAX_HISTORY_SENT = 20;
+// Tuqui's backend takes a result message up to this long.
+const MAX_REASON = 500;
 // Counted from the proposal, so docking, moving, clicking and typing are inside it too.
 // Ends before Tuqui stops waiting (40 s), so the walk reports how it ended.
 const MAX_WALK_MS = 35000;
@@ -29,7 +33,8 @@ const SETTLE_MAX_MS = 8000;
 const MIN_SETTLE_MS = 600;
 // Odoo shows it about half a second after the click, while the server answers.
 const LOADING = ".o_loading_indicator:not(.o-fade-leave)";
-// Odoo's menu and action services, set when the web client starts.
+// Odoo's menu and action services, and how a menu's screen opens without a click,
+// set when the web client starts.
 let odooServices = null;
 
 /**
@@ -68,8 +73,13 @@ function unlessCut(promise, signal) {
 }
 
 /** What travels to Tuqui for one action: no element, no function. */
-function describeAction({ id, role, name, section, operation, phrase }) {
-    return { id, role, name, section, operation, phrase };
+function describeAction({ id, role, name, section, operation, phrase, expanded }) {
+    return { id, role, name, section, operation, phrase, expanded };
+}
+
+/** What a step request carries of the history: Tuqui's backend refuses more than 20 items. */
+export function historySent(history) {
+    return history.slice(-MAX_HISTORY_SENT);
 }
 
 /**
@@ -80,10 +90,11 @@ function describeAction({ id, role, name, section, operation, phrase }) {
  * @param {string} goal Where to go, in words.
  * @param {(step: object, options: {signal: AbortSignal}) => Promise<{choice: string, confidence: number, go: boolean, arrived: boolean}>} ask
  *   The next move for this screen; `signal` aborts once the walk no longer waits for it.
- * @param {{signal?: AbortSignal, startedAt?: number, menu?: {ids: number[], ends_walk: boolean}, odoo?: {menus: object, action: object}}} [options]
+ * @param {{signal?: AbortSignal, startedAt?: number, menu?: {ids: number[], ends_walk: boolean}, odoo?: {menus: object, action: object, navigate?: (menuId: number, options: {signal: AbortSignal}) => Promise<{opened: boolean, reason?: string}>}}} [options]
  *   `startedAt`: when the proposal arrived, as `performance.now()`. `menu`: the way
  *   through Odoo's menu to click first; with `ends_walk`, its screen is the destination.
- *   `odoo`: the menu and action services, Odoo's own by default.
+ *   `odoo`: the menu and action services, and how a menu's screen opens without
+ *   clicking, Odoo's own by default.
  */
 export async function showMe(goal, ask, { signal, startedAt = performance.now(), menu, odoo = odooServices } = {}) {
     const history = [];
@@ -106,6 +117,10 @@ export async function showMe(goal, ask, { signal, startedAt = performance.now(),
     pilot.interrupted = interrupted;
     window.addEventListener("pointerdown", onTouch, true);
     window.addEventListener("keydown", onTouch, true);
+    // Why the way through Odoo's menu stopped short, told with how the walk ended.
+    let menuStop = null;
+    const withMenuStop = (status, reason) =>
+        menuStop && reason && status !== "arrived" ? `${reason} (the menu way stopped first: ${menuStop})` : reason;
     const end = (status, reason) => {
         const cutReason = interrupted() ? why() : null;
         clearTimeout(timer);
@@ -114,27 +129,67 @@ export async function showMe(goal, ask, { signal, startedAt = performance.now(),
         window.removeEventListener("keydown", onTouch, true);
         // Ends what is still running for it: the model's answer and the wait for the screen.
         cancel();
+        watching?.();
         pilot.remove();
         const seconds = (performance.now() - startedAt) / 1000;
-        return { status, reason: cutReason ?? reason, history, steps, seconds, model_seconds: modelMs / 1000, screen: lastScreen };
+        return {
+            status,
+            reason: withMenuStop(status, cutReason ?? reason)?.slice(0, MAX_REASON),
+            history,
+            steps,
+            seconds,
+            model_seconds: modelMs / 1000,
+            screen: lastScreen,
+        };
     };
     const stopped = () => end("stopped");
-    /** The cursor goes to `el`, the page clicks it and the screen settles; false once cut. */
+    // The screen watched since just before the current step, stopped on reading it.
+    let watching = null;
+    const watch = () => {
+        watching?.();
+        watching = watchEffect(odoo);
+    };
+    /** Once the screen settles, what changed since `watch()`; false once cut. */
+    const settledEffect = async () => {
+        await wait(settle(stop.signal));
+        const effect = watching();
+        return interrupted() ? false : effect;
+    };
+    /** The cursor goes to `el`, the page clicks it and the screen settles; the click's effect, or false once cut. */
     const press = async (el) => {
         el.scrollIntoView({ block: "nearest" });
-        if ((await wait(pilot.moveTo(el))) === CUT || interrupted() || (await wait(pilot.click())) === CUT) {
+        if ((await wait(pilot.moveTo(el))) === CUT || interrupted()) {
+            return false;
+        }
+        // After the walk's own scroll: what it moved is not the click's effect.
+        watch();
+        if ((await wait(pilot.click())) === CUT) {
             return false;
         }
         el.click();
-        await wait(settle(stop.signal));
-        return !interrupted();
+        return settledEffect();
+    };
+    /** Odoo opens `menu`'s screen without a click, telling the person nothing; the effect,
+     *  false once cut, or `{reason}` when Odoo did not open it. */
+    const open = async (menu) => {
+        watch();
+        // The walk's signal: once it is cut, the screen is not opened behind the person.
+        const opening = odoo.navigate?.(menu.id, { signal: stop.signal }) ?? { opened: false, reason: "this Odoo cannot open a menu's screen" };
+        const result = await wait(Promise.resolve(opening));
+        if (result === CUT || interrupted()) {
+            return false;
+        }
+        return result?.opened ? settledEffect() : { reason: result?.reason || "" };
     };
     try {
         if (menu?.ids?.length && odoo) {
-            const walked = await walkMenu(menu.ids, { ...odoo, press });
-            for (const name of walked.clicked) {
-                steps.push({ choice: name, target: name, operation: "menu", confidence: 1, ms: 0 });
-                history.push({ role: "menuitem", name });
+            const walked = await walkMenu(menu.ids, { ...odoo, press, open });
+            if (!walked.arrived && walked.reason !== "cut") {
+                menuStop = walked.reason || null;
+            }
+            for (const { name, role, effect, operation } of walked.clicked) {
+                steps.push({ choice: name, target: name, operation, confidence: 1, ms: 0 });
+                history.push({ role, name, effect });
             }
             if (interrupted()) {
                 return stopped();
@@ -148,10 +203,11 @@ export async function showMe(goal, ask, { signal, startedAt = performance.now(),
                 return stopped();
             }
             pilot.thinking();
-            const { screen, actions } = observe(goal);
+            const { screen, actions } = observe(goal, { odoo, menu });
             lastScreen = screen;
             const asked = performance.now();
-            const decision = await wait(ask({ goal, screen, actions: actions.map(describeAction), history }, { signal: stop.signal }));
+            const request = { goal, screen, actions: actions.map(describeAction), history: historySent(history) };
+            const decision = await wait(ask(request, { signal: stop.signal }));
             if (decision === CUT) {
                 return stopped();
             }
@@ -193,6 +249,7 @@ export async function showMe(goal, ask, { signal, startedAt = performance.now(),
                 return end("stopped", "no progress: the same action on the same screen");
             }
             visited.add(fingerprint);
+            let watched = false;
             if (action.el) {
                 action.el.scrollIntoView({ block: "nearest" });
                 if ((await wait(pilot.moveTo(action.el))) === CUT || interrupted()) {
@@ -201,16 +258,26 @@ export async function showMe(goal, ask, { signal, startedAt = performance.now(),
                 if (!action.el.isConnected || !isReachable(action.el)) {
                     return end("stopped", "the chosen control disappeared or was covered");
                 }
+                // After the walk's own scroll: what it moved is not the step's effect.
+                watch();
+                watched = true;
                 if (action.role !== "search" && (await wait(pilot.click())) === CUT) {
                     return stopped();
                 }
+            }
+            if (!watched) {
+                watch();
             }
             // Typing stops by itself once cut: the pilot checks `interrupted` before each character.
             if ((await wait(action.run(pilot))) === CUT) {
                 return stopped();
             }
-            history.push({ role: action.role, name: action.name });
-            await wait(settle(stop.signal));
+            const done = { role: action.role, name: action.name };
+            history.push(done);
+            const effect = await settledEffect();
+            if (effect) {
+                done.effect = effect;
+            }
         }
         return end("stopped", "it reached the step limit");
     } catch (error) {
@@ -219,9 +286,9 @@ export async function showMe(goal, ask, { signal, startedAt = performance.now(),
 }
 
 registry.category("services").add("tuqui_show_me", {
-    dependencies: ["menu", "action"],
-    start(env, { menu, action }) {
-        odooServices = { menus: menu, action };
+    dependencies: ["menu", "action", "tuquiAssistant"],
+    start(env, { menu, action, tuquiAssistant }) {
+        odooServices = { menus: menu, action, navigate: (menuId, options) => tuquiAssistant.openMenuScreen(menuId, options) };
         knowMenus(menu);
         // Debug-only entry point for the benchmark harness, which brings its own `ask`.
         // `env.debug` throws in 20.0: the debug mode is a plugin, read as `odoo.debug` outside one.

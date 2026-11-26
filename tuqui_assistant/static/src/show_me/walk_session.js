@@ -15,6 +15,22 @@ function readMenu(menu) {
     return ids.length && ids.every(Number.isInteger) ? { ids, ends_walk: menu.ends_walk === true } : undefined;
 }
 
+const MAX_ALTERNATIVES = 2;
+const MAX_ALTERNATIVE_LENGTH = 128;
+
+/** One step as it travels back: the runner-up choices only when the model gave them. */
+function readStep(step) {
+    const read = {
+        choice: String(step.target || step.choice || ""),
+        operation: String(step.operation || ""),
+        confidence: Math.round(Number(step.confidence || 0) * 100) / 100,
+    };
+    if (Array.isArray(step.alternatives) && step.alternatives.length) {
+        read.alternatives = step.alternatives.slice(0, MAX_ALTERNATIVES).map((alt) => String(alt).slice(0, MAX_ALTERNATIVE_LENGTH));
+    }
+    return read;
+}
+
 const stopped = (message) => ({ status: "stopped", applied: [], skipped: [], message, steps: [] });
 
 /**
@@ -85,11 +101,7 @@ export function makeWalkSession({ post, getContext, isHidden = () => false, walk
                 skipped: [],
                 message: result.reason || null,
                 // Each answer of the judgment model, so the walk can be read back from the conversation.
-                steps: result.steps.map((s) => ({
-                    choice: String(s.target || s.choice || ""),
-                    operation: String(s.operation || ""),
-                    confidence: Math.round(Number(s.confidence || 0) * 100) / 100,
-                })),
+                steps: result.steps.map(readStep),
             };
         } finally {
             controller = null;
