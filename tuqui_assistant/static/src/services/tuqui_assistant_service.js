@@ -2979,7 +2979,28 @@ export const tuquiAssistantService = {
             );
         }
 
-        async function navigateToAction({ xmlid, menuId, section }) {
+        /** Open an existing window or client action, or a menu's; tells the user why when it cannot. */
+        async function navigateToAction(payload) {
+            const failure = await openScreen(payload);
+            if (failure) {
+                notification.add(failure.message, { type: failure.type });
+                return false;
+            }
+            return true;
+        }
+
+        /**
+         * Open the screen of the menu `menuId` for a walk: the person is told nothing,
+         * the walk says how it went. `{opened: true}`, or `{opened: false, reason}`.
+         * Nothing opens once `signal` aborts: the walk ended, the screen is the person's.
+         */
+        async function openMenuScreen(menuId, { signal } = {}) {
+            const failure = await openScreen({ menuId }, { signal });
+            return failure ? { opened: false, reason: String(failure.message) } : { opened: true };
+        }
+
+        /** Open a window or client action by `xmlid` or `menuId`: null once open, or why not as `{message, type}`. */
+        async function openScreen({ xmlid, menuId, section }, { signal } = {}) {
             let request = xmlid;
             let menu;
             const menus = env.services.menu;
@@ -2987,29 +3008,29 @@ export const tuquiAssistantService = {
                 menu = menus.getMenu(menuId);
                 // The menus Odoo loaded are the ones this user can see.
                 if (!menu?.actionID) {
-                    notification.add(_t("That menu is not available to you in this Odoo."), { type: "warning" });
-                    return false;
+                    return { message: _t("That menu is not available to you in this Odoo."), type: "warning" };
                 }
                 request = menu.actionID;
             } else if (typeof xmlid !== "string" || !xmlid.includes(".")) {
                 // An xmlid is "module.name". A bare client-action tag ("reload",
                 // "soft_reload") Odoo runs locally, and it reloads the page.
-                notification.add(_t("Cannot navigate: missing the screen to open."), { type: "danger" });
-                return false;
+                return { message: _t("Cannot navigate: missing the screen to open."), type: "danger" };
             }
-            const failureMessage = menu
-                ? (error) => _t("Could not open that menu in Odoo: %s", error)
-                : (error) => _t("Could not open that screen in Odoo: %s", error);
+            const failed = (error) => ({
+                message: menu
+                    ? _t("Could not open that menu in Odoo: %s", error.message || error)
+                    : _t("Could not open that screen in Odoo: %s", error.message || error),
+                type: "danger",
+            });
             let loaded;
             try {
                 loaded = await action.loadAction(request);
             } catch (e) {
-                return navigationFailed(failureMessage, e);
+                return failed(e);
             }
             // doAction would run a server action or follow a URL: only screens open.
             if (!SCREEN_ACTIONS.has(loaded?.type)) {
-                notification.add(_t("That is not a screen, so Tuqui did not open it."), { type: "warning" });
-                return false;
+                return { message: _t("That is not a screen, so Tuqui did not open it."), type: "warning" };
             }
             // As in Odoo: a menu starts over from its app; any other action stacks on
             // the breadcrumbs, so the user can go back to where they were.
@@ -3032,12 +3053,20 @@ export const tuquiAssistantService = {
                 try {
                     target.context = makeContext([target.context, { module: section }], user.context);
                 } catch (e) {
-                    return navigationFailed(failureMessage, e);
+                    return failed(e);
                 }
             } else if (section) {
                 options.additionalContext = { module: section };
             }
-            return runAction(target, options, failureMessage);
+            if (signal?.aborted) {
+                return { message: "the walk ended before the screen opened", type: "warning" };
+            }
+            try {
+                await action.doAction(target, options);
+            } catch (e) {
+                return failed(e);
+            }
+            return null;
         }
 
         /**
@@ -3187,6 +3216,7 @@ export const tuquiAssistantService = {
             proposeChatter,
             settleProposal,
             navigate,
+            openMenuScreen,
             switchCompany(companyId) {
                 // The reload would throw away changes nobody has reviewed yet.
                 if (activeRecord?.dirty) {

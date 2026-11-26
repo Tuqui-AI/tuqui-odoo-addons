@@ -1,8 +1,8 @@
 import { describe, expect, getFixture, test } from "@odoo/hoot";
 import { advanceTime } from "@odoo/hoot-mock";
-import { collectTargets, elementFor } from "@tuqui_assistant/screen/screen_targets";
-import { isReachable, knowMenus, observe } from "@tuqui_assistant/show_me/screen_actions";
-import { showMe } from "@tuqui_assistant/show_me/show_me";
+import { collectTargets, elementFor, readTargets } from "@tuqui_assistant/screen/screen_targets";
+import { effectOf, fitScreen, isReachable, knowMenus, observe, watchEffect } from "@tuqui_assistant/show_me/screen_actions";
+import { historySent, showMe } from "@tuqui_assistant/show_me/show_me";
 import { makeWalkSession } from "@tuqui_assistant/show_me/walk_session";
 
 /**
@@ -192,22 +192,64 @@ describe("show me: what can be done", () => {
 });
 
 describe("show me: dropdowns and cards", () => {
-    test("opening a dropdown is offered, what it holds is judged on its own", () => {
+    test("a view's dropdown is never offered: what it opens is drawn over the page and leads nowhere", () => {
+        // Measured in prod: walks stuck re-clicking «Acciones», the search panel toggle and a card's ⋮.
         screen(`
-            <div class="o_control_panel"><div class="o_cp_action_menus"><div class="dropdown">
-                <button type="button" class="btn dropdown-toggle">Acciones</button>
-            </div></div></div>
-            <div class="o-dropdown--menu dropdown-menu"><span role="menuitem" class="dropdown-item">Eliminar</span></div>
+            <div class="o_action_manager">
+                <div class="o_control_panel">
+                    <div class="o_cp_action_menus"><button type="button" class="btn dropdown-toggle">Acciones</button></div>
+                    <button type="button" class="o_searchview_dropdown_toggler dropdown-toggle" title="Mostrar u ocultar panel de búsqueda"><i class="fa fa-caret-down"></i></button>
+                </div>
+                <div class="o_kanban_record"><span>Banco Supervielle</span>
+                    <div class="o_dropdown_kanban"><button class="btn o-dropdown dropdown-toggle" title="Menú"><i class="fa fa-ellipsis-v"></i></button></div>
+                </div>
+            </div>
+            <div class="o-overlay-container"><div class="o-dropdown--menu"><span role="menuitem" class="dropdown-item">Eliminar</span></div></div>
         `);
         const offered = names(observe("Borrá el extracto").actions);
-        expect(offered).toInclude("Acciones");
-        expect(offered).not.toInclude("Eliminar");
+        for (const name of ["Acciones", "Mostrar u ocultar panel de búsqueda", "Menú", "card menu", "Eliminar"]) {
+            expect(offered).not.toInclude(name);
+        }
+        expect(offered.some((name) => name.startsWith("Banco Supervielle"))).toBe(true);
     });
 
-    test("a card's menu is offered to open, named by its card, though it only shows on hover", () => {
-        screen(CARD);
-        const menu = observe("Estados de cuenta del Supervielle").actions.find((a) => a.name === "card menu");
-        expect(menu.section).toMatch(/^Banco Supervielle/);
+    test("a closed top-bar menu is offered with its state; an open one is not, its entries are", () => {
+        // Measured in prod: «Configuración» clicked again while open, nine times in a row.
+        screen(`
+            <nav class="o_main_navbar"><div class="o_menu_sections">
+                <button type="button" class="dropdown-toggle" aria-expanded="false" data-menu-xmlid="stock.menu_stock_warehouse_mgmt">Operaciones</button>
+                <button type="button" class="dropdown-toggle show" aria-expanded="true" data-menu-xmlid="stock.menu_stock_config_settings">Configuración</button>
+            </div></nav>
+            <div class="o-overlay-container"><div class="o-dropdown--menu">
+                <a role="menuitem" class="dropdown-item" data-menu-xmlid="stock.menu_warehouse_config" href="/odoo/action-1">Almacenes</a>
+            </div></div>
+        `);
+        const { actions } = observe("Llevame a los almacenes");
+        const offered = names(actions);
+        expect(offered).toInclude("Operaciones");
+        expect(offered).toInclude("Almacenes");
+        expect(offered).not.toInclude("Configuración");
+        expect(actions.find((a) => a.name === "Operaciones").expanded).toBe(false);
+    });
+
+    test("Enterprise's home menu button is not offered while the home menu is open", () => {
+        screen(`
+            <nav class="o_main_navbar"><a href="/odoo" class="o_menu_toggle">Home Menu</a></nav>
+            <div class="o_home_menu"><a class="o_app o_menuitem" data-menu-xmlid="crm.crm_menu_root" href="#">CRM</a></div>
+        `);
+        const offered = names(observe("Llevame al CRM").actions);
+        expect(offered).toInclude("CRM");
+        expect(offered).not.toInclude("Home Menu");
+    });
+
+    test("on a phone, the apps button is not offered while its apps sidebar is open", () => {
+        // Community and phones: the button opens a sidebar, not Enterprise's home menu.
+        const navbar = `<nav class="o_main_navbar"><a href="/odoo" class="o_menu_toggle">Apps</a></nav>`;
+        screen(navbar);
+        const closed = observe("Llevame al CRM").actions.find((a) => a.name === "Apps");
+        expect(closed.expanded).toBe(false);
+        screen(`${navbar}<div class="o_app_menu_sidebar"><ul><li class="o_app" data-menu-xmlid="crm.crm_menu_root">CRM</li></ul></div>`);
+        expect(names(observe("Llevame al CRM").actions)).not.toInclude("Apps");
     });
 
     test("a card's buttons carry the card they are on, for the drop to tell them apart", () => {
@@ -218,6 +260,38 @@ describe("show me: dropdowns and cards", () => {
         expect(sections.length).toBe(2);
         expect(sections[0]).toMatch(/^Banco Supervielle/);
         expect(sections[1]).toMatch(/^Banco Galicia/);
+    });
+});
+
+describe("show me: records", () => {
+    test("a record in a dialog is not offered: choosing it there may select or write it", () => {
+        screen(`
+            <div class="o-overlay-container"><div class="modal show"><div class="modal-content"><table><tbody>
+                <tr class="o_data_row"><td class="o_data_cell" name="name">Azure Interior</td></tr>
+            </tbody></table></div></div></div>
+        `);
+        expect(observe("Elegí Azure Interior").actions.filter((a) => a.role === "record")).toEqual([]);
+    });
+
+    test("a list row opens from its first cell with text, not from the empty drag handle", () => {
+        screen(`
+            <div class="o_action_manager"><table><tbody><tr class="o_data_row">
+                <td class="o_data_cell o_handle_cell" name="sequence"><span class="o_row_handle"></span></td>
+                <td class="o_data_cell" name="name">Mesa plegable</td>
+            </tr></tbody></table></div>
+        `);
+        const row = observe("Abrí la mesa plegable").actions.find((a) => a.role === "record");
+        expect(row.name).toBe("Mesa plegable");
+        expect(row.el.getAttribute("name")).toBe("name");
+    });
+
+    test("a line of a form's list is not offered: clicking it edits the line", () => {
+        screen(`
+            <div class="o_action_manager"><div class="o_field_widget" name="order_line"><table><tbody>
+                <tr class="o_data_row"><td class="o_data_cell" name="name">Línea del pedido</td></tr>
+            </tbody></table></div></div>
+        `);
+        expect(observe("Abrí la línea").actions.filter((a) => a.role === "record")).toEqual([]);
     });
 });
 
@@ -239,7 +313,152 @@ describe("show me: links", () => {
     });
 });
 
+describe("show me: what Odoo knows of the screen", () => {
+    const MENUS = {
+        10: { id: 10, name: "CRM", xmlid: "crm.crm_menu_root", children: [31], actionID: 1 },
+        31: { id: 31, name: "Configuración", xmlid: "crm.crm_menu_config", children: [77, 78], actionID: false },
+        77: { id: 77, name: "Equipos de ventas", xmlid: "sales_team.crm_team_config", children: [], actionID: 240 },
+        78: { id: 78, name: "Ajustes", xmlid: "crm.crm_config_settings_menu", children: [], actionID: 500 },
+    };
+    const services = (controller) => ({
+        menus: { getMenu: (id) => MENUS[id], getCurrentApp: () => MENUS[10] },
+        action: { currentController: controller },
+    });
+
+    test("the open action, its model, view and menu, and whether it is the walk's menu item", () => {
+        screen(`<div class="o_action_manager"></div>`);
+        const odoo = services({
+            action: { id: 240, name: "Equipos de ventas", res_model: "crm.team" },
+            props: { type: "list", resModel: "crm.team" },
+            displayName: "Equipos de ventas",
+            config: { breadcrumbs: [{ name: "Equipos de ventas" }] },
+        });
+        const { screen: seen } = observe("Equipos de ventas", { odoo, menu: { ids: [10, 31, 77], ends_walk: true } });
+        expect(seen).toEqual({
+            app: "CRM",
+            breadcrumbs: "Equipos de ventas",
+            active_tab: "",
+            visible_text: "",
+            sections: "",
+            action: "Equipos de ventas",
+            model: "crm.team",
+            view_type: "list",
+            record: "",
+            menu_path: "CRM > Configuración > Equipos de ventas",
+            at_menu_leaf: true,
+        });
+    });
+
+    test("an open form names its record, and another screen is not the walk's menu item", () => {
+        screen(`<div class="o_action_manager"></div>`);
+        const odoo = services({
+            action: { id: 300, name: "Contactos", res_model: "res.partner" },
+            props: { type: "form", resModel: "res.partner", resId: 7 },
+            displayName: "Azure Interior",
+            config: { breadcrumbs: [{ name: "Contactos" }, { name: "Azure Interior" }] },
+        });
+        const { screen: seen } = observe("Azure Interior", { odoo, menu: { ids: [10, 31, 77], ends_walk: true } });
+        expect(seen.record).toBe("Azure Interior");
+        expect(seen.breadcrumbs).toBe("Contactos > Azure Interior");
+        expect(seen.menu_path).toBe("");
+        expect(seen.at_menu_leaf).toBe(false);
+    });
+
+    test("a record opened from the menu's list is not the menu item, though it shares its action", () => {
+        screen(`<div class="o_action_manager"></div>`);
+        const odoo = services({
+            action: { id: 240, name: "Equipos de ventas", res_model: "crm.team" },
+            props: { type: "form", resModel: "crm.team", resId: 3 },
+            displayName: "Europa",
+            config: { breadcrumbs: [{ name: "Equipos de ventas" }, { name: "Europa" }] },
+        });
+        const { screen: seen } = observe("Equipos de ventas", { odoo, menu: { ids: [10, 31, 77], ends_walk: true } });
+        expect(seen.at_menu_leaf).toBe(false);
+    });
+
+    test("a form that is the menu's own screen (Settings) is the menu item", () => {
+        screen(`<div class="o_action_manager"></div>`);
+        const odoo = services({
+            action: { id: 500, name: "Ajustes", res_model: "res.config.settings" },
+            props: { type: "form", resModel: "res.config.settings" },
+            displayName: "Ajustes",
+            config: { breadcrumbs: [{ name: "Ajustes" }] },
+        });
+        const { screen: seen } = observe("Ajustes del CRM", { odoo, menu: { ids: [10, 31, 78], ends_walk: true } });
+        expect(seen.at_menu_leaf).toBe(true);
+        expect(seen.menu_path).toBe("CRM > Configuración > Ajustes");
+    });
+
+    test("the screen's own name is not offered to type into its search box", () => {
+        // Measured in prod: arrived, the walk typed the destination's name into the search.
+        screen(`<div class="o_action_manager"><input type="text" role="searchbox" placeholder="Buscar…"/></div>`);
+        const odoo = services({
+            action: { id: 240, name: "Equipos de ventas", res_model: "crm.team" },
+            props: { type: "list" },
+            config: { breadcrumbs: [{ name: "Equipos de ventas" }] },
+        });
+        const phrases = observe("Equipos de ventas de Mitchell", { odoo })
+            .actions.filter((a) => a.role === "search")
+            .map((a) => a.phrase);
+        expect(phrases).not.toInclude("Equipos de ventas");
+        expect(phrases).toInclude("ventas de Mitchell");
+    });
+});
+
+describe("show me: what travels to Tuqui", () => {
+    test("a screen too long for Tuqui is cut in its long texts, never in its flags", () => {
+        const long = {
+            app: "Ventas",
+            breadcrumbs: "Pedidos > S00042",
+            active_tab: "Líneas",
+            visible_text: "Línea de pedido ñandú ".repeat(600),
+            sections: "Sección ".repeat(200),
+            action: "Pedidos",
+            model: "sale.order",
+            view_type: "form",
+            record: "S00042",
+            menu_path: "Ventas > Pedidos > Pedidos",
+            at_menu_leaf: true,
+        };
+        const fitted = fitScreen(long);
+        expect(JSON.stringify(fitted).length <= 7900).toBe(true);
+        expect(fitted.at_menu_leaf).toBe(true);
+        expect(fitted.view_type).toBe("form");
+        expect(fitted.model).toBe("sale.order");
+        expect(fitted.visible_text.length < long.visible_text.length).toBe(true);
+        const small = { ...long, visible_text: "Pedido", sections: "" };
+        expect(fitScreen(small)).toEqual(small);
+    });
+
+    test("the walk reads the records on its own: the screen's list leaves them out when asked", () => {
+        screen(`<div class="o_action_manager"><table><tbody>
+            <tr class="o_data_row"><td class="o_data_cell" name="name">Mesa plegable</td></tr>
+        </tbody></table></div>`);
+        expect(readTargets(document, { records: false }).targets.filter((t) => t.role === "record")).toEqual([]);
+        expect(readTargets(document).targets.filter((t) => t.role === "record").length).toBe(1);
+        expect(observe("Mesa").actions.filter((a) => a.role === "record").length).toBe(1);
+    });
+});
+
 describe("show me: the parts of a long screen", () => {
+    test("a long screen with nothing walkable inside can still be scrolled", () => {
+        screen(`
+            <div class="o_action_manager"><div class="o_content" style="overflow:auto;height:100px">
+                <p style="height:1000px">Texto largo sin controles</p>
+            </div></div>
+        `);
+        expect(names(observe("Llevame al final").actions)).toInclude("Scroll down");
+    });
+
+    test("a box that overflows by a pixel is not offered to scroll", () => {
+        screen(`
+            <div class="o_action_manager"><div class="o_content" style="overflow:auto;height:100px">
+                <p style="height:101px;margin:0">Casi entra</p>
+            </div></div>
+        `);
+        expect(names(observe("Llevame al final").actions)).not.toInclude("Scroll down");
+    });
+
     test("a part out of view is listed, marked, and offered to go to", () => {
         screen(`
             <h2>Operaciones</h2>
@@ -396,6 +615,78 @@ describe("show me: when the walk stops", () => {
         expect(walk.reason).toInclude("cancelled");
     });
 
+    const nothing = () => {};
+    for (const [what, onClick, effect, prepare = nothing] of [
+        ["a click that changes nothing", nothing, "nothing changed"],
+        [
+            "a click that opens a dialog",
+            (fixture) => fixture.insertAdjacentHTML("beforeend", `<div class="modal show"><div class="modal-content"><p>Asistente</p></div></div>`),
+            "dialog opened",
+        ],
+        [
+            "what the walk's own scroll changed is not the click's",
+            nothing,
+            "nothing changed",
+            // Stands for anything scrolling to the control changes on screen.
+            // Hoot makes the element's own property read only: define it instead of assigning.
+            (fixture, button) =>
+                Object.defineProperty(button, "scrollIntoView", {
+                    configurable: true,
+                    value: () => fixture.insertAdjacentHTML("beforeend", `<div class="o-dropdown--menu">x</div>`),
+                }),
+        ],
+    ]) {
+        test(`the history says what each step did: ${what}`, async () => {
+            const fixture = screen(`<div class="o_action_manager"><nav class="o_main_navbar"><div class="o_menu_sections">
+                <button type="button" data-menu-xmlid="stock.menu_stock_root" style="position:fixed;left:0;top:0;width:80px;height:40px">Inventario</button>
+            </div></nav></div>`);
+            const button = fixture.querySelector("button");
+            prepare(fixture, button);
+            button.addEventListener("click", () => onClick(fixture));
+            let seen = null;
+            const answers = [
+                ({ actions }) => ({ choice: actions.find((a) => a.name === "Inventario").id, confidence: 0.9, go: true }),
+                ({ history }) => ((seen = history), { choice: "done", confidence: 0.95, arrived: true }),
+            ];
+            const walking = showMe("Llevame al inventario", async (step) => answers.shift()(step));
+            await advanceTime(15000);
+            expect((await walking).status).toBe("arrived");
+            expect(seen).toEqual([{ role: "button", name: "Inventario", effect }]);
+        });
+    }
+
+    test("opening Enterprise's home menu reads as a menu opened, not as another place", () => {
+        const before = { place: "CRM > Pipeline", dialog: false, menuOpen: false };
+        const after = { place: "home", dialog: false, menuOpen: true, changed: true };
+        expect(effectOf(before, after)).toBe("menu opened");
+    });
+
+    test("closing a menu reads as a menu closed, unless the place changed", () => {
+        const before = { place: "CRM", dialog: false, menuOpen: true };
+        expect(effectOf(before, { place: "CRM", dialog: false, menuOpen: false, changed: true })).toBe("menu closed");
+        expect(effectOf(before, { place: "CRM > Equipos", dialog: false, menuOpen: false, changed: true })).toBe("breadcrumb changed");
+    });
+
+    test("the screen changed when something was added to it or scrolled, and not otherwise", () => {
+        const fixture = screen(`<div class="o_action_manager"><p>Lista</p></div>`);
+        const area = fixture.querySelector(".o_action_manager");
+        expect(watchEffect(null)()).toBe("nothing changed");
+        let read = watchEffect(null);
+        area.insertAdjacentHTML("beforeend", "<p>Otra fila</p>");
+        expect(read()).toBe("screen changed");
+        read = watchEffect(null);
+        area.dispatchEvent(new Event("scroll"));
+        expect(read()).toBe("screen changed");
+    });
+
+    test("the reason a walk ended is cut to what Tuqui takes", async () => {
+        screen(NAVBAR);
+        const walk = await showMe("Llevame al inventario", async () => {
+            throw new Error("x".repeat(800));
+        });
+        expect(walk.reason.length).toBe(500);
+    });
+
     test("a sure done is an arrival, with no step taken", async () => {
         screen(NAVBAR);
         const ask = async () => ({ choice: "done", confidence: 0.95, arrived: true });
@@ -424,6 +715,28 @@ describe("show me: a step asked to Tuqui", () => {
         expect(failure).toInclude("no longer waits");
         walks.onStepResult({ id: posted[0], ok: true, result: { choice: "done" } });
         expect(posted).toEqual(["s1"]);
+    });
+});
+
+describe("show me: how the walk is told back", () => {
+    test("the runner-up choices of a step travel back, at most two and short; none when absent", async () => {
+        const walks = makeWalkSession({
+            post: () => {},
+            getContext: () => null,
+            walk: async () => ({
+                status: "stopped",
+                reason: "it was unsure of the next step",
+                steps: [
+                    { choice: "a1", target: "Ventas", confidence: 0.5, alternatives: ["Configuración (0.45)", "Informes (0.2)", "Extra (0.1)"] },
+                    { choice: "a2", target: "Pedidos", confidence: 0.9, alternatives: ["x".repeat(300)] },
+                    { choice: "a3", target: "Clientes", confidence: 0.9 },
+                ],
+            }),
+        });
+        const result = await walks.run("g", "p1");
+        expect(result.steps[0].alternatives).toEqual(["Configuración (0.45)", "Informes (0.2)"]);
+        expect(result.steps[1].alternatives[0].length).toBe(128);
+        expect("alternatives" in result.steps[2]).toBe(false);
     });
 });
 
@@ -487,6 +800,7 @@ function odooMenus({ currentApp = null } = {}) {
         }
     });
     return {
+        state,
         menus: { getMenu: (id) => byId[id], getCurrentApp: () => state.app },
         action: {
             get currentController() {
@@ -508,6 +822,7 @@ describe("show me: through Odoo's menu", () => {
         expect(walk.status).toBe("arrived");
         expect(asked).toBe(0);
         expect(walk.steps.map((s) => [s.target, s.operation, s.confidence])).toEqual([
+            ["Aplicaciones", "menu", 1],
             ["CRM", "menu", 1],
             ["Configuración", "menu", 1],
             ["Equipos de ventas", "menu", 1],
@@ -526,19 +841,26 @@ describe("show me: through Odoo's menu", () => {
     test("with more to go after the menu, the model walks the rest and knows the way taken", async () => {
         const odoo = odooMenus();
         const seen = [];
-        const ask = async (step) => (seen.push(step.history.map((h) => h.name)), { choice: "done", confidence: 0.9, arrived: true });
+        const ask = async (step) => (seen.push(step.history.map((h) => [h.role, h.name, h.effect])), { choice: "done", confidence: 0.9, arrived: true });
         const walking = showMe("la pestaña Miembros", ask, { menu: { ...TEAMS, ends_walk: false }, odoo });
         await advanceTime(15000);
         const walk = await walking;
         expect(walk.status).toBe("arrived");
-        expect(seen).toEqual([["CRM", "Configuración", "Equipos de ventas"]]);
+        expect(seen).toEqual([
+            [
+                ["button", "Aplicaciones", "menu opened"],
+                ["menuitem", "CRM", "breadcrumb changed"],
+                ["menuitem", "Configuración", "menu opened"],
+                ["menuitem", "Equipos de ventas", "menu closed"],
+            ],
+        ]);
     });
 
-    for (const [what, menu] of [
-        ["a menu this user's Odoo does not show", { ids: [10, 31, 99], ends_walk: true }],
-        ["a menu entry not on this screen", { ids: [10, 77], ends_walk: true }],
+    for (const [what, menu, why] of [
+        ["a menu this user's Odoo does not show", { ids: [10, 31, 99], ends_walk: true }, "does not show that menu"],
+        ["a menu entry not on this screen", { ids: [10, 77], ends_walk: true }, "is not on screen"],
     ]) {
-        test(`${what} is left to the model, with the goal in words`, async () => {
+        test(`${what} is left to the model, with the goal in words, and the end says why the menu stopped`, async () => {
             const odoo = odooMenus({ currentApp: { id: 10 } });
             let goal = null;
             const ask = async (step) => ((goal = step.goal), { choice: "stop", confidence: 0.9 });
@@ -547,8 +869,77 @@ describe("show me: through Odoo's menu", () => {
             const walk = await walking;
             expect(goal).toBe("CRM > Equipos de ventas");
             expect(walk.status).toBe("stopped");
+            expect(walk.reason).toInclude("it saw no way forward");
+            expect(walk.reason).toInclude(`the menu way stopped first: `);
+            expect(walk.reason).toInclude(why);
         });
     }
+
+    const screenLeaf = (odoo) => {
+        const real = odoo.menus.getMenu;
+        odoo.menus.getMenu = (id) => (id === 77 ? { ...real(77), actionModel: "ir.actions.act_window" } : real(id));
+    };
+
+    test("with a dialog open, the item's screen is not opened over it: what the person typed would be lost", async () => {
+        const odoo = odooMenus({ currentApp: { id: 10 } });
+        screenLeaf(odoo);
+        getFixture().insertAdjacentHTML("beforeend", `<div class="modal show"><div class="modal-content"><input value="a medio escribir"/></div></div>`);
+        const opened = [];
+        odoo.navigate = async (menuId) => (opened.push(menuId), { opened: true });
+        const walking = showMe("Equipos de ventas", async () => ({ choice: "stop" }), { menu: { ids: [10, 77], ends_walk: true }, odoo });
+        await advanceTime(15000);
+        const walk = await walking;
+        expect(opened).toEqual([]);
+        expect(walk.status).toBe("stopped");
+        expect(walk.reason).toInclude("a dialog is open: close it first");
+    });
+
+    test("a menu entry not on this screen whose item is a screen: Odoo opens it directly", async () => {
+        const odoo = odooMenus({ currentApp: { id: 10 } });
+        screenLeaf(odoo);
+        const opened = [];
+        odoo.navigate = async (menuId) => (opened.push(menuId), (odoo.state.open = 240), { opened: true });
+        let asked = 0;
+        const walking = showMe("Equipos de ventas", async () => (asked++, { choice: "stop" }), { menu: { ids: [10, 77], ends_walk: true }, odoo });
+        await advanceTime(15000);
+        const walk = await walking;
+        expect(opened).toEqual([77]);
+        expect(walk.status).toBe("arrived");
+        expect(asked).toBe(0);
+        expect(walk.steps.map((s) => [s.target, s.operation])).toEqual([["Equipos de ventas", "open"]]);
+        expect(walk.history.map((h) => h.name)).toEqual(["Equipos de ventas"]);
+    });
+
+    test("an app whose own menu runs no screen: its item opens directly, and the apps button is in the history", async () => {
+        const odoo = odooMenus();
+        screenLeaf(odoo);
+        const screenOf77 = odoo.menus.getMenu;
+        odoo.menus.getMenu = (id) => (id === 10 ? { ...screenOf77(10), actionModel: "ir.actions.server" } : screenOf77(id));
+        odoo.navigate = async () => ((odoo.state.open = 240), { opened: true });
+        const walking = showMe("Equipos de ventas", async () => ({ choice: "stop" }), { menu: TEAMS, odoo });
+        await advanceTime(15000);
+        const walk = await walking;
+        expect(walk.status).toBe("arrived");
+        expect(walk.history.map((h) => [h.role, h.name])).toEqual([
+            ["button", "Aplicaciones"],
+            ["menuitem", "Equipos de ventas"],
+        ]);
+    });
+
+    test("an app whose own menu runs no screen, and Odoo does not open the item: no arrival, the model looks", async () => {
+        const odoo = odooMenus();
+        screenLeaf(odoo);
+        const real = odoo.menus.getMenu;
+        odoo.menus.getMenu = (id) => (id === 10 ? { ...real(10), actionModel: "ir.actions.server" } : real(id));
+        odoo.navigate = async () => ({ opened: false, reason: "That menu is not available to you in this Odoo." });
+        let asked = 0;
+        const walking = showMe("Equipos de ventas", async () => (asked++, { choice: "stop" }), { menu: TEAMS, odoo });
+        await advanceTime(15000);
+        const walk = await walking;
+        expect(asked).toBe(1);
+        expect(walk.status).toBe("stopped");
+        expect(walk.reason).toInclude("Odoo did not open its screen: That menu is not available");
+    });
 
     test("a menu clicked whose screen Odoo did not open is no arrival: the model looks", async () => {
         const odoo = odooMenus({ currentApp: { id: 10 } });
@@ -558,6 +949,28 @@ describe("show me: through Odoo's menu", () => {
         await advanceTime(15000);
         await walking;
         expect(asked).toBe(1);
+    });
+
+    test("a record of the menu's list is no arrival, though it shares the menu's action", async () => {
+        // Odoo 17/18: the form opened from a list keeps the list's action.
+        const odoo = odooMenus({ currentApp: { id: 10 } });
+        odoo.action = {
+            currentController: { action: { id: 240 }, config: { breadcrumbs: [{ name: "Equipos de ventas" }, { name: "Europa" }] } },
+        };
+        let asked = 0;
+        const walking = showMe("Equipos de ventas", async () => (asked++, { choice: "stop", confidence: 0.9 }), { menu: TEAMS, odoo });
+        await advanceTime(15000);
+        await walking;
+        expect(asked).toBe(1);
+    });
+
+    test("a step sends Tuqui only the last 20 entries of the history, and keeps them all", () => {
+        // Tuqui's backend refuses a step with more: the walk would end on a step error.
+        const history = Array.from({ length: 25 }, (_, i) => ({ role: "menuitem", name: `Nivel ${i}` }));
+        const sent = historySent(history);
+        expect(sent.length).toBe(20);
+        expect(sent[0].name).toBe("Nivel 5");
+        expect(history.length).toBe(25);
     });
 
     test("a heading inside a dropdown is passed over: its entries are already there", async () => {
@@ -596,6 +1009,7 @@ describe("show me: through Odoo's menu", () => {
             expect(walk.steps.map((s) => s.target)).toEqual(["Configuración"]);
             expect(document.querySelector('[data-menu-xmlid="sales_team.crm_team_config"]')).not.toBe(null);
             expect(asked).toBe(0);
+            expect(walk.reason).toBe(undefined);
         });
     }
 
@@ -605,7 +1019,7 @@ describe("show me: through Odoo's menu", () => {
         await advanceTime(15000);
         const walk = await walking;
         expect(walk.status).toBe("arrived");
-        expect(walk.steps.map((s) => s.target)).toEqual(["CRM"]);
+        expect(walk.steps.map((s) => s.target)).toEqual(["Aplicaciones", "CRM"]);
     });
 
     test("the menu's way reaches the walk from the chat, and a way that is not one is dropped", async () => {
