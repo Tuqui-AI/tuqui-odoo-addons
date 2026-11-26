@@ -32,9 +32,24 @@ export const OWN_PANEL = ".o-tuqui-panel";
 // The assistant's own UI, Odoo's chat windows and its passing notifications are not
 // part of the screen.
 const NOT_THE_SCREEN = `${OWN_PANEL}, .o-mail-ChatWindow, .o-mail-ChatHub, .o_notification_manager`;
+// Odoo's menus, wherever they are drawn (top bar, dropdown, burger, home menu): every
+// entry names the menu it opens. The openers show the apps (Enterprise's home menu,
+// Community's apps dropdown) or the top bar's sections that do not fit (its "more",
+// the phone's burger).
+export const ODOO_MENUS = {
+    entry: "[data-menu-xmlid]",
+    appOpeners: [".o_menu_toggle", ".o_navbar_apps_menu .dropdown-toggle"],
+    sectionOpeners: [".o_menu_sections_more .dropdown-toggle", ".o_mobile_menu_toggle"],
+    // Enterprise's home menu, drawn instead of an app.
+    home: ".o_home_menu",
+    // The apps sidebar the apps button opens on a phone (Community and Enterprise).
+    appsSidebar: ".o_app_menu_sidebar",
+    // The open app's name on the top bar.
+    brand: ".o_main_navbar .o_menu_brand",
+};
 // The app's own menus, a way to a screen and not a step on it: Odoo tags each entry
 // with its menu, plus the app tiles and the home button.
-export const APP_MENUS = "[data-menu-xmlid], .o_app.o_menuitem, .o_menu_toggle";
+export const APP_MENUS = `${ODOO_MENUS.entry}, .o_app.o_menuitem, .o_menu_toggle`;
 // The action types Tuqui may open or click: screens, never code, a URL or a report.
 export const SCREEN_ACTIONS = new Set(["ir.actions.act_window", "ir.actions.client"]);
 const MAX_TARGETS = 300;
@@ -47,9 +62,14 @@ const MAX_RECORDS = 40;
 
 let current = new Map();
 
-function clean(text) {
+/** Text as a person reads it, on one line. */
+export function squash(text) {
     // Odoo pads empty checkbox labels with a zero-width space.
-    return (text || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
+    return (text || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function clean(text) {
+    return squash(text).slice(0, MAX_NAME);
 }
 
 function isVisible(el) {
@@ -64,10 +84,15 @@ function isVisible(el) {
     return style.visibility === "visible" && style.display !== "none";
 }
 
+/** Whether `node` scrolls its content up and down, by more than `slack` pixels. */
+export function scrolls(node, slack = 0) {
+    return /(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + slack;
+}
+
 /** The box `el` scrolls in: what does not scroll with it can be scrolled away from it. */
 function scrollerOf(el) {
     for (let node = el.parentElement; node; node = node.parentElement) {
-        if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) {
+        if (scrolls(node)) {
             return node;
         }
     }
@@ -201,7 +226,7 @@ export function sectionOf(el) {
     // A top-bar menu belongs to the open app: "Configuración" of Contacts does not
     // lead to the configuration of Inventory.
     if (el.closest(".o_main_navbar .o_menu_sections")) {
-        return clean(el.ownerDocument.querySelector(".o_main_navbar .o_menu_brand")?.innerText);
+        return clean(el.ownerDocument.querySelector(ODOO_MENUS.brand)?.innerText);
     }
     // A control inside a row or a card belongs to that record: a list with an «Aplicar» per
     // row has one per product, told apart by the row («Mesa plegable»), then by the block.
@@ -229,9 +254,10 @@ function blockName(el) {
 
 /**
  * Read the visible controls of the screen without remembering them: what
- * `collectTargets` lists, plus the element behind each id.
+ * `collectTargets` lists, plus the element behind each id. Without `records`, the
+ * rows and cards are left out, for a caller that reads them on its own.
  */
-export function readTargets(doc = document) {
+export function readTargets(doc = document, { records = true } = {}) {
     const root = screenRoot(doc);
     const found = new Map();
     const targets = [];
@@ -284,7 +310,8 @@ export function readTargets(doc = document) {
         targets.push(target);
     }
     // The rows and cards too: without them a guide asks to search for what is already listed.
-    for (const { target, el } of readRecords(doc, Math.min(MAX_RECORDS, MAX_TARGETS - targets.length))) {
+    const limit = records ? Math.min(MAX_RECORDS, MAX_TARGETS - targets.length) : 0;
+    for (const { target, el } of readRecords(doc, limit)) {
         found.set(target.id, el);
         targets.push(target);
     }
@@ -310,7 +337,8 @@ export function collectTargets(doc = document) {
     return targets;
 }
 
-const fold = (text) => (text || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+/** Text folded to compare names: one line, lower case. */
+export const fold = (text) => squash(text).toLocaleLowerCase();
 
 // A list row or a kanban card is not a control, but a guide names it by its text
 // ("open the Supervielle mapping"): it can be marked when no control has the name.
@@ -322,7 +350,7 @@ export function recordName(record) {
 }
 
 /** The first `limit` records on the screen, named by their text: a row is marked on its first cell with text. */
-function readRecords(doc, limit) {
+export function readRecords(doc, limit) {
     const records = [];
     for (const record of screenRoot(doc).querySelectorAll(RECORDS)) {
         if (records.length >= limit) {
